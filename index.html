@@ -6,7 +6,14 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-    import { getFirestore, collection, query, where, getDocs, addDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+    import { 
+      getAuth, 
+      createUserWithEmailAndPassword, 
+      signInWithEmailAndPassword 
+    } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+    import { 
+      getFirestore, collection, doc, setDoc, query, where, getDocs, onSnapshot 
+    } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
     // Config Firebase
     const firebaseConfig = {
@@ -20,6 +27,7 @@
     };
 
     const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
     const db = getFirestore(app);
 
     // Connexion
@@ -27,24 +35,27 @@
       e.preventDefault();
       const email = document.getElementById("loginEmail").value;
       const password = document.getElementById("loginPassword").value;
-
-      const q = query(
-        collection(db, "users"),
-        where("email", "==", email),
-        where("password", "==", password)
-      );
-      const querySnapshot = await getDocs(q);
-
       const msgBox = document.getElementById("loginMessage");
 
-      if (!querySnapshot.empty) {
+      try {
+        const userCred = await signInWithEmailAndPassword(auth, email, password);
+        const uid = userCred.user.uid;
+
+        // Vérifie si banni
+        const userDoc = await getDocs(query(collection(db, "users"), where("__name__", "==", uid)));
+        if (!userDoc.empty && userDoc.docs[0].data().banned) {
+          msgBox.innerText = "⛔ Vous avez été banni.";
+          msgBox.className = "text-red-400 mt-2 text-sm";
+          return;
+        }
+
         msgBox.innerText = "✅ Connexion réussie !";
         msgBox.className = "text-green-400 mt-2 text-sm";
         setTimeout(() => {
           window.location.href = "home.html";
         }, 1200);
-      } else {
-        msgBox.innerText = "❌ Email ou mot de passe incorrect";
+      } catch (err) {
+        msgBox.innerText = "❌ " + err.message;
         msgBox.className = "text-red-400 mt-2 text-sm";
       }
     }
@@ -54,38 +65,42 @@
       e.preventDefault();
       const email = document.getElementById("signupEmail").value;
       const password = document.getElementById("signupPassword").value;
-
+      const pseudo = document.getElementById("signupPseudo").value.trim();
       const msgBox = document.getElementById("signupMessage");
 
       try {
-        // Vérifie si déjà inscrit
-        const q = query(collection(db, "users"), where("email", "==", email));
-        const querySnapshot = await getDocs(q);
-
-        if (!querySnapshot.empty) {
-          msgBox.innerText = "⚠️ Cet email est déjà utilisé";
+        // Vérifie si pseudo déjà pris
+        const q = query(collection(db, "users"), where("pseudoLower", "==", pseudo.toLowerCase()));
+        const snap = await getDocs(q);
+        if (!snap.empty) {
+          msgBox.innerText = "⚠️ Ce pseudo est déjà utilisé";
           msgBox.className = "text-yellow-400 mt-2 text-sm";
           return;
         }
 
-        await addDoc(collection(db, "users"), {
+        // Crée compte Auth
+        const userCred = await createUserWithEmailAndPassword(auth, email, password);
+        const uid = userCred.user.uid;
+
+        // Sauvegarde profil Firestore
+        await setDoc(doc(db, "users", uid), {
           email: email,
-          password: password
+          pseudo: pseudo,
+          pseudoLower: pseudo.toLowerCase(),
+          banned: false,
+          createdAt: new Date()
         });
 
         msgBox.innerText = "✅ Inscription réussie ! Vous pouvez vous connecter.";
         msgBox.className = "text-green-400 mt-2 text-sm";
-
-        // Bascule auto vers connexion après 2s
         setTimeout(() => toggleForms("login"), 2000);
-
       } catch (err) {
-        msgBox.innerText = "❌ Erreur: " + err.message;
+        msgBox.innerText = "❌ " + err.message;
         msgBox.className = "text-red-400 mt-2 text-sm";
       }
     }
 
-    // Bascule entre login / signup
+    // Bascule entre login/signup
     function toggleForms(mode) {
       const loginBox = document.getElementById("loginBox");
       const signupBox = document.getElementById("signupBox");
@@ -98,12 +113,11 @@
       }
     }
 
-    // Compteur d'inscrits en temps réel
+    // Compteur utilisateurs en temps réel
     function listenUsersCount() {
       const usersCol = collection(db, "users");
       onSnapshot(usersCol, (snapshot) => {
-        const count = snapshot.size;
-        document.getElementById("usersCount").innerText = count;
+        document.getElementById("usersCount").innerText = snapshot.size;
       });
     }
 
@@ -113,8 +127,7 @@
       document.querySelectorAll("[data-toggle]").forEach(btn =>
         btn.addEventListener("click", () => toggleForms(btn.dataset.toggle))
       );
-
-      listenUsersCount(); // démarre le compteur
+      listenUsersCount();
     });
   </script>
 </head>
@@ -124,20 +137,20 @@
     <h2 class="text-3xl font-bold text-white text-center mb-2">🚀 Kyky</h2>
     <p class="text-gray-200 text-center mb-6">👥 <span id="usersCount">0</span> inscrits</p>
     
-    <!-- Formulaire de Connexion -->
+    <!-- Connexion -->
     <div id="loginBox">
       <h3 class="text-xl text-white text-center mb-4">Connexion</h3>
       <form id="loginForm" class="space-y-5">
         <div>
           <label class="block text-sm text-gray-200">Email</label>
-          <input type="email" id="loginEmail" required class="mt-1 w-full px-4 py-2 rounded-xl bg-white/20 text-white placeholder-gray-300 focus:ring-2 focus:ring-pink-400">
+          <input type="email" id="loginEmail" required class="mt-1 w-full px-4 py-2 rounded-xl bg-white/20 text-white">
         </div>
         <div>
           <label class="block text-sm text-gray-200">Mot de passe</label>
-          <input type="password" id="loginPassword" required class="mt-1 w-full px-4 py-2 rounded-xl bg-white/20 text-white placeholder-gray-300 focus:ring-2 focus:ring-pink-400">
+          <input type="password" id="loginPassword" required class="mt-1 w-full px-4 py-2 rounded-xl bg-white/20 text-white">
         </div>
         <div id="loginMessage"></div>
-        <button type="submit" class="w-full py-3 rounded-xl bg-gradient-to-r from-pink-500 to-purple-600 text-white font-semibold shadow-lg hover:scale-105 transform transition duration-300">
+        <button type="submit" class="w-full py-3 rounded-xl bg-gradient-to-r from-pink-500 to-purple-600 text-white font-semibold">
           Se connecter
         </button>
       </form>
@@ -147,20 +160,24 @@
       </p>
     </div>
 
-    <!-- Formulaire d'Inscription -->
+    <!-- Inscription -->
     <div id="signupBox" class="hidden">
       <h3 class="text-xl text-white text-center mb-4">Inscription</h3>
       <form id="signupForm" class="space-y-5">
         <div>
+          <label class="block text-sm text-gray-200">Pseudo</label>
+          <input type="text" id="signupPseudo" required class="mt-1 w-full px-4 py-2 rounded-xl bg-white/20 text-white">
+        </div>
+        <div>
           <label class="block text-sm text-gray-200">Email</label>
-          <input type="email" id="signupEmail" required class="mt-1 w-full px-4 py-2 rounded-xl bg-white/20 text-white placeholder-gray-300 focus:ring-2 focus:ring-pink-400">
+          <input type="email" id="signupEmail" required class="mt-1 w-full px-4 py-2 rounded-xl bg-white/20 text-white">
         </div>
         <div>
           <label class="block text-sm text-gray-200">Mot de passe</label>
-          <input type="password" id="signupPassword" required class="mt-1 w-full px-4 py-2 rounded-xl bg-white/20 text-white placeholder-gray-300 focus:ring-2 focus:ring-pink-400">
+          <input type="password" id="signupPassword" required class="mt-1 w-full px-4 py-2 rounded-xl bg-white/20 text-white">
         </div>
         <div id="signupMessage"></div>
-        <button type="submit" class="w-full py-3 rounded-xl bg-gradient-to-r from-green-500 to-blue-600 text-white font-semibold shadow-lg hover:scale-105 transform transition duration-300">
+        <button type="submit" class="w-full py-3 rounded-xl bg-gradient-to-r from-green-500 to-blue-600 text-white font-semibold">
           S'inscrire
         </button>
       </form>
@@ -170,6 +187,5 @@
       </p>
     </div>
   </div>
-
 </body>
 </html>
