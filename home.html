@@ -6,256 +6,308 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <script src="https://cdn.tailwindcss.com"></script>
   <script type="module">
-    /* =========================
-       Firebase + Firestore
-    ==========================*/
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-    import {
-      getFirestore, collection, doc, setDoc, getDoc, addDoc, deleteDoc,
-      getDocs, query, where, orderBy, limit, onSnapshot, serverTimestamp,
-      updateDoc, increment
-    } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+  /* =========================
+     Firebase Realtime Database
+  ==========================*/
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import {
+    getDatabase, ref, set, get, push, update, onValue, serverTimestamp, remove
+  } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
-    const firebaseConfig = {
-      apiKey: "AIzaSyDFfUnu076ChN_Js0QYmaABdJJMOQbGv1Q",
-      authDomain: "kyky-4b748.firebaseapp.com",
-      projectId: "kyky-4b748",
-      storageBucket: "kyky-4b748.firebasestorage.app",
-      messagingSenderId: "980205708455",
-      appId: "1:980205708455:web:b9125afa8028f65b042782",
-      measurementId: "G-HDMXRP2FP0"
-    };
+  const firebaseConfig = {
+    apiKey: "AIzaSyDFfUnu076ChN_Js0QYmaABdJJMOQbGv1Q",
+    authDomain: "kyky-4b748.firebaseapp.com",
+    databaseURL: "https://kyky-4b748-default-rtdb.firebaseio.com/",
+    projectId: "kyky-4b748",
+    storageBucket: "kyky-4b748.appspot.com",
+    messagingSenderId: "980205708455",
+    appId: "1:980205708455:web:b9125afa8028f65b042782",
+    measurementId: "G-HDMXRP2FP0"
+  };
 
-    const app = initializeApp(firebaseConfig);
-    const db  = getFirestore(app);
+  const app = initializeApp(firebaseConfig);
+  const db = getDatabase(app);
 
-    /* =========================
-       Identité locale (sans Auth)
-    ==========================*/
-    const uidKey = "kyky_uid";
-    const nameKey = "kyky_name";
+  /* =========================
+     Identité locale
+  ==========================*/
+  const uidKey = "kyky_uid";
+  const nameKey = "kyky_name";
 
-    function uuid() {
-      return ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>
-        (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)
-      );
+  function uuid() {
+    return ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>
+      (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)
+    );
+  }
+
+  async function ensureIdentity() {
+    let uid = localStorage.getItem(uidKey);
+    let displayName = localStorage.getItem(nameKey);
+
+    if (!uid) {
+      uid = uuid();
+      localStorage.setItem(uidKey, uid);
+    }
+    if (!displayName) {
+      const asked = prompt("Choisis ton pseudo :")?.trim();
+      displayName = asked && asked.length ? asked.replace(/\s+/g,"") : "user_"+uid.slice(0,5);
+      localStorage.setItem(nameKey, displayName);
     }
 
-    async function ensureIdentity() {
-      let uid = localStorage.getItem(uidKey);
-      let displayName = localStorage.getItem(nameKey);
+    const userRef = ref(db, "users/" + uid);
+    const snap = await get(userRef);
+    const banned = snap.val()?.banned || false;
 
-      if (!uid) {
-        uid = uuid();
-        localStorage.setItem(uidKey, uid);
-      }
-      // Si pas de pseudo → demander
-      if (!displayName) {
-        const asked = prompt("Choisis ton pseudo (ex: @capAmerica) :")?.trim();
-        displayName = asked && asked.length ? asked.replace(/\s+/g,"") : "user_"+uid.slice(0,5);
-        localStorage.setItem(nameKey, displayName);
-      }
-
-      // Crée/maj doc utilisateur
-      const userRef = doc(db, "users", uid);
-      const snap = await getDoc(userRef);
-      if (!snap.exists()) {
-        await setDoc(userRef, {
-          uid,
-          username: displayName,
-          usernameLower: displayName.toLowerCase(),
-          followersCount: 0,
-          postsCount: 0,
-          createdAt: serverTimestamp(),
-          lastActiveAt: serverTimestamp()
-        });
-      } else if (snap.data().username !== displayName) {
-        await updateDoc(userRef, { username: displayName, usernameLower: displayName.toLowerCase(), lastActiveAt: serverTimestamp() });
-      } else {
-        await updateDoc(userRef, { lastActiveAt: serverTimestamp() });
-      }
-
-      document.getElementById("meName").textContent = displayName;
-      document.getElementById("meHandle").textContent = "@"+displayName.toLowerCase();
-      document.getElementById("avatarMe").textContent = initials(displayName);
-      return { uid, displayName };
+    if (!snap.exists()) {
+      await set(userRef, {
+        uid,
+        username: displayName,
+        usernameLower: displayName.toLowerCase(),
+        followersCount: 0,
+        postsCount: 0,
+        createdAt: serverTimestamp(),
+        lastActiveAt: serverTimestamp(),
+        banned: false
+      });
+    } else {
+      await update(userRef, {
+        username: displayName,
+        usernameLower: displayName.toLowerCase(),
+        lastActiveAt: serverTimestamp()
+      });
     }
 
-    function initials(name) {
-      return name.split(/[^a-zA-Z0-9]+/).filter(Boolean).slice(0,2).map(s=>s[0]).join("").toUpperCase().slice(0,2) || "U";
-    }
+    document.getElementById("meName").textContent = displayName;
+    document.getElementById("meHandle").textContent = "@"+displayName.toLowerCase();
+    document.getElementById("avatarMe").textContent = initials(displayName);
 
-    /* =========================
-       UI Helpers
-    ==========================*/
-    function timeAgo(ts) {
-      const d = ts?.toDate ? ts.toDate() : (ts instanceof Date ? ts : new Date());
-      const diff = (Date.now() - d.getTime())/1000;
-      if (diff < 60) return "now";
-      if (diff < 3600) return Math.floor(diff/60)+"m";
-      if (diff < 86400) return Math.floor(diff/3600)+"h";
-      return d.toLocaleDateString();
-    }
+    if (banned) showBannedMessage();
 
-    function el(strings,...vals){ return strings.map((s,i)=>s+(vals[i]??"")).join(""); }
+    return { uid, displayName, banned };
+  }
 
-    /* =========================
-       Récup ident, listeners
-    ==========================*/
-    let current = null;
-    let postsUnsub = null;
-    let topUsersUnsub = null;
+  function initials(name) {
+    return name.split(/[^a-zA-Z0-9]+/).filter(Boolean).slice(0,2).map(s=>s[0]).join("").toUpperCase().slice(0,2) || "U";
+  }
 
-    window.addEventListener("DOMContentLoaded", async () => {
-      current = await ensureIdentity();
+  /* =========================
+     Affichage bannissement
+  ==========================*/
+  function showBannedMessage() {
+    const composeSection = document.querySelector(".bg-white.p-4.rounded-xl.shadow");
+    composeSection.innerHTML = `
+      <div class="flex items-center gap-4 p-4 rounded-xl" style="background: linear-gradient(to right, #ff4d4d, #990000); color: white;">
+        <img src="alert.png" class="w-12 h-12"/>
+        <div>
+          <div class="font-bold text-lg">Vous avez été banni par un administrateur.</div>
+          <div class="text-sm">Vous ne pouvez plus continuer toute activité.</div>
+        </div>
+      </div>
+    `;
+  }
+
+  /* =========================
+     UI Helpers
+  ==========================*/
+  function timeAgo(ts) {
+    const d = ts instanceof Date ? ts : new Date(ts);
+    const diff = (Date.now() - d.getTime())/1000;
+    if (diff < 60) return "now";
+    if (diff < 3600) return Math.floor(diff/60)+"m";
+    if (diff < 86400) return Math.floor(diff/3600)+"h";
+    return d.toLocaleDateString();
+  }
+
+  function el(strings,...vals){ return strings.map((s,i)=>s+(vals[i]??"")).join(""); }
+
+  /* =========================
+     Timeline & Listeners
+  ==========================*/
+  let current = null;
+
+  window.addEventListener("DOMContentLoaded", async () => {
+    current = await ensureIdentity();
+    if (!current.banned) {
       wireCompose();
-      listenLatestPosts();
-      listenTopUsers();
+    }
+    listenLatestPosts();
+    listenTopUsers();
+  });
+
+  /* =========================
+     Poster un tweet
+  ==========================*/
+  function wireCompose() {
+    const ta = document.getElementById("tweetInput");
+    const btn = document.getElementById("tweetBtn");
+
+    ta.addEventListener("input", () => {
+      if (current.banned) return;
+      const len = ta.value.trim().length;
+      document.getElementById("charLeft").textContent = 280-len;
+      btn.disabled = len === 0 || len > 280;
     });
 
-    /* =========================
-       Poster un tweet
-    ==========================*/
-    function wireCompose() {
-      const ta = document.getElementById("tweetInput");
-      const btn = document.getElementById("tweetBtn");
+    btn.addEventListener("click", async () => {
+      if (current.banned) return;
+      const text = ta.value.trim();
+      if (!text || text.length > 280) return;
 
-      ta.addEventListener("input", () => {
-        const len = ta.value.trim().length;
-        document.getElementById("charLeft").textContent = 280-len;
-        btn.disabled = len === 0 || len > 280;
-      });
+      const postsRef = ref(db, "posts");
+      const newPostRef = push(postsRef);
+      const post = {
+        id: newPostRef.key,
+        authorId: current.uid,
+        authorName: current.displayName,
+        authorHandle: "@"+current.displayName.toLowerCase(),
+        text,
+        createdAt: serverTimestamp(),
+        likeCount: 0,
+        commentCount: 0
+      };
+      await set(newPostRef, post);
 
-      btn.addEventListener("click", async () => {
-        const text = ta.value.trim();
-        if (!text || text.length > 280) return;
+      const userRef = ref(db,"users/"+current.uid);
+      const userSnap = await get(userRef);
+      const postsCount = (userSnap.val()?.postsCount || 0) + 1;
+      await update(userRef, { postsCount, lastActiveAt: serverTimestamp() });
 
-        const post = {
-          authorId: current.uid,
-          authorName: current.displayName || localStorage.getItem(nameKey),
-          authorHandle: "@"+(current.displayName || localStorage.getItem(nameKey)).toLowerCase(),
-          text,
-          createdAt: serverTimestamp(),
-          likeCount: 0,
-          commentCount: 0
-        };
-        await addDoc(collection(db, "posts"), post);
-        await updateDoc(doc(db,"users", current.uid), { postsCount: increment(1), lastActiveAt: serverTimestamp() });
-        document.getElementById("tweetInput").value = "";
-        document.getElementById("charLeft").textContent = 280;
-        document.getElementById("tweetBtn").disabled = true;
-      });
-    }
+      ta.value = "";
+      document.getElementById("charLeft").textContent = 280;
+      btn.disabled = true;
+    });
+  }
 
-    /* =========================
-       Timeline : derniers posts
-    ==========================*/
-    function listenLatestPosts() {
-      if (postsUnsub) postsUnsub();
-      const qy = query(collection(db,"posts"), orderBy("createdAt","desc"), limit(25));
-      postsUnsub = onSnapshot(qy, (snap) => {
-        const wrap = document.getElementById("feed");
-        wrap.innerHTML = "";
-        snap.forEach(docSnap => {
-          const p = { id: docSnap.id, ...docSnap.data() };
+  /* =========================
+     Timeline realtime
+  ==========================*/
+  function listenLatestPosts() {
+    const postsRef = ref(db, "posts");
+    onValue(postsRef, (snap) => {
+      const wrap = document.getElementById("feed");
+      wrap.innerHTML = "";
+      const posts = snap.val();
+      if (!posts) return;
+      Object.values(posts)
+        .sort((a,b)=>b.createdAt - a.createdAt)
+        .slice(0,25)
+        .forEach(p => {
           wrap.insertAdjacentHTML("beforeend", renderPost(p));
           wirePostActions(p);
           listenCountsLive(p.id);
         });
-      });
-    }
+    });
+  }
 
-    function renderPost(p) {
-      const av = initials(p.authorName||"User");
-      return el`
-        <article id="post_${p.id}" class="bg-white p-4 rounded-xl shadow border border-gray-100">
-          <div class="flex items-start space-x-4">
-            <div class="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center font-semibold text-gray-700">${av}</div>
-            <div class="flex-1">
-              <div class="flex items-center gap-2">
-                <span class="font-semibold">${p.authorName||"User"}</span>
-                <span class="text-gray-500 text-sm">${p.authorHandle||""}</span>
-                <span class="text-gray-400 text-sm">· ${timeAgo(p.createdAt)}</span>
-              </div>
-              <p class="mt-1">${(p.text||"").replace(/</g,"&lt;")}</p>
+  function renderPost(p) {
+    const av = initials(p.authorName||"User");
+    return el`
+      <article id="post_${p.id}" class="bg-white p-4 rounded-xl shadow border border-gray-100">
+        <div class="flex items-start space-x-4">
+          <div class="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center font-semibold text-gray-700">${av}</div>
+          <div class="flex-1">
+            <div class="flex items-center gap-2">
+              <span class="font-semibold">${p.authorName||"User"}</span>
+              <span class="text-gray-500 text-sm">${p.authorHandle||""}</span>
+              <span class="text-gray-400 text-sm">· ${timeAgo(p.createdAt)}</span>
+            </div>
+            <p class="mt-1">${(p.text||"").replace(/</g,"&lt;")}</p>
 
-              <div class="flex items-center gap-6 mt-3 text-gray-500 text-sm">
-                <button data-act="comment" data-id="${p.id}" class="hover:text-blue-600">💬 <span id="c_${p.id}">${p.commentCount||0}</span></button>
-                <button data-act="like" data-id="${p.id}" class="hover:text-pink-600">❤️ <span id="l_${p.id}">${p.likeCount||0}</span></button>
-                <button data-act="reply" data-id="${p.id}" class="hover:text-green-600">↩️ Répondre</button>
-              </div>
+            <div class="flex items-center gap-6 mt-3 text-gray-500 text-sm">
+              <button data-act="comment" data-id="${p.id}" class="hover:text-blue-600">💬 <span id="c_${p.id}">${p.commentCount||0}</span></button>
+              <button data-act="like" data-id="${p.id}" class="hover:text-pink-600">❤️ <span id="l_${p.id}">${p.likeCount||0}</span></button>
+              <button data-act="reply" data-id="${p.id}" class="hover:text-green-600">↩️ Répondre</button>
+            </div>
 
-              <div id="comments_${p.id}" class="mt-3 space-y-3 hidden"></div>
-
-              <div id="composer_${p.id}" class="mt-3 hidden">
-                <textarea id="input_${p.id}" rows="2" class="w-full border rounded-lg p-2" placeholder="Écrire un commentaire…"></textarea>
-                <div class="flex justify-end mt-2">
-                  <button data-act="sendComment" data-id="${p.id}" class="px-3 py-1 rounded-lg bg-blue-500 text-white">Publier</button>
-                </div>
+            <div id="comments_${p.id}" class="mt-3 space-y-3 hidden"></div>
+            <div id="composer_${p.id}" class="mt-3 hidden">
+              <textarea id="input_${p.id}" rows="2" class="w-full border rounded-lg p-2" placeholder="Écrire un commentaire…"></textarea>
+              <div class="flex justify-end mt-2">
+                <button data-act="sendComment" data-id="${p.id}" class="px-3 py-1 rounded-lg bg-blue-500 text-white">Publier</button>
               </div>
             </div>
           </div>
-        </article>
-      `;
+        </div>
+      </article>
+    `;
+  }
+
+  function wirePostActions(p){
+    if (current.banned) return; // bloque actions si banni
+    const root = document.getElementById(`post_${p.id}`);
+    root.querySelector('[data-act="comment"]').addEventListener("click", () => toggleComments(p.id));
+    root.querySelector('[data-act="reply"]').addEventListener("click", () => toggleComposer(p.id, true));
+    root.querySelector('[data-act="like"]').addEventListener("click", () => toggleLike(p.id));
+    root.querySelector('[data-act="sendComment"]').addEventListener("click", () => sendComment(p.id));
+  }
+
+  function toggleComposer(postId, show){
+    const box = document.getElementById(`composer_${postId}`);
+    if (show===true) box.classList.remove("hidden");
+    else box.classList.toggle("hidden");
+  }
+
+  function toggleComments(postId){
+    const list = document.getElementById(`comments_${postId}`);
+    list.classList.toggle("hidden");
+    if (!list.dataset.loaded) listenComments(postId);
+  }
+
+  async function toggleLike(postId){
+    if (current.banned) return;
+    const uid = current.uid;
+    const likeRef = ref(db, `postLikes/${postId}/${uid}`);
+    const snap = await get(likeRef);
+    const postRef = ref(db, `posts/${postId}`);
+    const postSnap = await get(postRef);
+    const post = postSnap.val();
+    if (!post) return;
+
+    if (snap.exists()) {
+      await remove(likeRef);
+      await update(postRef, { likeCount: (post.likeCount||0) - 1 });
+    } else {
+      await set(likeRef, { uid, createdAt: serverTimestamp() });
+      await update(postRef, { likeCount: (post.likeCount||0) + 1 });
     }
+  }
 
-    function wirePostActions(p){
-      const root = document.getElementById(`post_${p.id}`);
-      root.querySelector('[data-act="comment"]').addEventListener("click", () => toggleComments(p.id));
-      root.querySelector('[data-act="reply"]').addEventListener("click", () => toggleComposer(p.id, true));
-      root.querySelector('[data-act="like"]').addEventListener("click", () => toggleLike(p.id));
-      root.querySelector('[data-act="sendComment"]').addEventListener("click", () => sendComment(p.id));
-    }
+  async function sendComment(postId){
+    if (current.banned) return;
+    const input = document.getElementById(`input_${postId}`);
+    const text = input.value.trim();
+    if (!text) return;
 
-    function toggleComposer(postId, show){
-      const box = document.getElementById(`composer_${postId}`);
-      if (show===true) box.classList.remove("hidden");
-      else box.classList.toggle("hidden");
-    }
+    const commentRef = ref(db, `postComments/${postId}`);
+    const newCommentRef = push(commentRef);
+    await set(newCommentRef, {
+      authorId: current.uid,
+      authorName: current.displayName,
+      text,
+      createdAt: serverTimestamp(),
+      replyTo: null
+    });
 
-    function toggleComments(postId){
-      const list = document.getElementById(`comments_${postId}`);
-      list.classList.toggle("hidden");
-      if (!list.dataset.loaded) listenComments(postId);
-    }
+    const postRef = ref(db, `posts/${postId}`);
+    const postSnap = await get(postRef);
+    const post = postSnap.val();
+    await update(postRef, { commentCount: (post.commentCount||0) + 1 });
 
-    async function toggleLike(postId){
-      const uid = localStorage.getItem(uidKey);
-      const likeRef = doc(db, "posts", postId, "likes", uid);
-      const snap = await getDoc(likeRef);
-      if (snap.exists()) {
-        await deleteDoc(likeRef);
-        await updateDoc(doc(db,"posts",postId), { likeCount: increment(-1) });
-      } else {
-        await setDoc(likeRef, { uid, createdAt: serverTimestamp() });
-        await updateDoc(doc(db,"posts",postId), { likeCount: increment(1) });
-      }
-    }
+    input.value = "";
+    toggleComposer(postId,false);
+  }
 
-    async function sendComment(postId){
-      const input = document.getElementById(`input_${postId}`);
-      const text = input.value.trim();
-      if (!text) return;
-
-      await addDoc(collection(db,"posts",postId,"comments"), {
-        authorId: localStorage.getItem(uidKey),
-        authorName: localStorage.getItem(nameKey),
-        text,
-        createdAt: serverTimestamp(),
-        replyTo: null
-      });
-      await updateDoc(doc(db,"posts",postId), { commentCount: increment(1) });
-      input.value = "";
-      toggleComposer(postId,false);
-    }
-
-    function listenComments(postId){
-      const list = document.getElementById(`comments_${postId}`);
-      const qy = query(collection(db,"posts",postId,"comments"), orderBy("createdAt","asc"), limit(50));
-      onSnapshot(qy, (snap) => {
-        list.innerHTML = "";
-        snap.forEach(c=>{
-          const d = c.data();
+  function listenComments(postId){
+    const list = document.getElementById(`comments_${postId}`);
+    const commentsRef = ref(db, `postComments/${postId}`);
+    onValue(commentsRef, (snap)=>{
+      list.innerHTML = "";
+      const comments = snap.val();
+      if (!comments) return;
+      Object.values(comments)
+        .sort((a,b)=>a.createdAt - b.createdAt)
+        .slice(0,50)
+        .forEach(d=>{
           list.insertAdjacentHTML("beforeend", el`
             <div class="flex items-start gap-3">
               <div class="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-xs font-semibold text-gray-700">${initials(d.authorName||"U")}</div>
@@ -266,101 +318,111 @@
             </div>
           `);
         });
-        list.dataset.loaded = "1";
-      });
-    }
+      list.dataset.loaded = "1";
+    });
+  }
 
-    function listenCountsLive(postId){
-      // petit listener pour garder like/comment à jour en direct
-      onSnapshot(doc(db,"posts",postId), (snap)=>{
-        if (!snap.exists()) return;
-        const d = snap.data();
-        const l = document.getElementById(`l_${postId}`); if (l) l.textContent = d.likeCount||0;
-        const c = document.getElementById(`c_${postId}`); if (c) c.textContent = d.commentCount||0;
-      });
-    }
+  function listenCountsLive(postId){
+    const postRef = ref(db, `posts/${postId}`);
+    onValue(postRef, snap=>{
+      const d = snap.val();
+      if (!d) return;
+      const l = document.getElementById(`l_${postId}`); if (l) l.textContent = d.likeCount||0;
+      const c = document.getElementById(`c_${postId}`); if (c) c.textContent = d.commentCount||0;
+    });
+  }
 
-    /* =========================
-       Top utilisateurs + Follow
-    ==========================*/
-    function listenTopUsers(){
-      if (topUsersUnsub) topUsersUnsub();
-      const qy = query(collection(db,"users"), orderBy("postsCount","desc"), limit(5));
-      topUsersUnsub = onSnapshot(qy, async (snap)=>{
-        const me = localStorage.getItem(uidKey);
-        const box = document.getElementById("whoToFollow");
-        box.innerHTML = "";
-        for (const u of snap.docs) {
-          const user = { id: u.id, ...u.data() };
-          if (user.id === me) continue;
+  /* =========================
+     Top utilisateurs
+  ==========================*/
+  function listenTopUsers(){
+    const usersRef = ref(db,"users");
+    onValue(usersRef, async snap=>{
+      const box = document.getElementById("whoToFollow");
+      const me = current.uid;
+      box.innerHTML = "";
+      const users = snap.val();
+      if (!users) return;
+      Object.values(users)
+        .sort((a,b)=>b.postsCount - a.postsCount)
+        .slice(0,5)
+        .forEach(u=>{
+          if (u.uid === me) return;
+          renderUserRowRTDB(u, box);
+        });
+    });
+  }
 
-          const isFollowing = await isFollowingUser(me, user.id);
-          box.insertAdjacentHTML("beforeend", renderUserRow(user, isFollowing));
-          wireFollowBtn(user.id);
-        }
-      });
-    }
-
-    function renderUserRow(u, following){
-      return el`
-        <div id="u_${u.id}" class="flex items-center justify-between mb-4">
-          <div class="flex items-center gap-3">
-            <div class="w-9 h-9 rounded-full bg-gray-300 flex items-center justify-center text-xs font-semibold text-gray-700">${initials(u.username)}</div>
-            <div>
-              <div class="font-semibold text-sm">${u.username}</div>
-              <div class="text-gray-500 text-xs">@${u.usernameLower}</div>
-              <div class="text-gray-500 text-xs">${u.followersCount||0} followers · ${u.postsCount||0} posts</div>
-            </div>
+  async function renderUserRowRTDB(u, container){
+    const me = current.uid;
+    const isFollowing = await isFollowingUser(me,u.uid);
+    container.insertAdjacentHTML("beforeend", el`
+      <div id="u_${u.uid}" class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-full bg-gray-300 flex items-center justify-center text-xs font-semibold text-gray-700">${initials(u.username)}</div>
+          <div>
+            <div class="font-semibold text-sm">${u.username}</div>
+            <div class="text-gray-500 text-xs">@${u.usernameLower}</div>
+            <div class="text-gray-500 text-xs">${u.followersCount||0} followers · ${u.postsCount||0} posts</div>
           </div>
-          <button data-follow="${u.id}" class="px-3 py-1 rounded-full text-sm ${following?'bg-gray-200':'bg-blue-500 text-white'}">
-            ${following ? 'Unfollow' : 'Follow'}
-          </button>
         </div>
-      `;
-    }
+        <button data-follow="${u.uid}" class="px-3 py-1 rounded-full text-sm ${isFollowing?'bg-gray-200':'bg-blue-500 text-white'}">
+          ${isFollowing?'Unfollow':'Follow'}
+        </button>
+      </div>
+    `);
+    wireFollowBtn(u.uid);
+  }
 
-    function wireFollowBtn(userId){
-      const btn = document.querySelector(`[data-follow="${userId}"]`);
-      btn.addEventListener("click", async ()=>{
-        const me = localStorage.getItem(uidKey);
-        const rel = doc(db,"follows", `${me}_${userId}`);
-        const snap = await getDoc(rel);
-        if (snap.exists()){
-          await deleteDoc(rel);
-          await updateDoc(doc(db,"users",userId), { followersCount: increment(-1) });
-          btn.classList.remove("bg-gray-200"); btn.classList.add("bg-blue-500","text-white");
-          btn.textContent = "Follow";
-        } else {
-          await setDoc(rel, { followerId: me, followeeId: userId, createdAt: serverTimestamp() });
-          await updateDoc(doc(db,"users",userId), { followersCount: increment(1) });
-          btn.classList.remove("bg-blue-500","text-white"); btn.classList.add("bg-gray-200");
-          btn.textContent = "Unfollow";
-        }
-      });
-    }
+  function wireFollowBtn(userId){
+    if (current.banned) return; // bloque follow si banni
+    const btn = document.querySelector(`[data-follow="${userId}"]`);
+    btn.addEventListener("click", async ()=>{
+      const me = current.uid;
+      const relRef = ref(db,"follows/"+me+"_"+userId);
+      const relSnap = await get(relRef);
+      const userRef = ref(db,"users/"+userId);
+      const userSnap = await get(userRef);
+      const user = userSnap.val();
 
-    async function isFollowingUser(me, otherId){
-      const snap = await getDoc(doc(db,"follows", `${me}_${otherId}`));
-      return snap.exists();
-    }
-
-    /* =========================
-       Changement de pseudo
-    ==========================*/
-    document.addEventListener("click",(e)=>{
-      if (e.target?.id === "changeName") {
-        const asked = prompt("Nouveau pseudo :")?.trim();
-        if (!asked) return;
-        localStorage.setItem(nameKey, asked);
-        ensureIdentity(); // met à jour la fiche user
+      if (relSnap.exists()){
+        await remove(relRef);
+        await update(userRef, { followersCount: (user.followersCount||1) - 1 });
+        btn.classList.remove("bg-gray-200"); btn.classList.add("bg-blue-500","text-white");
+        btn.textContent = "Follow";
+      } else {
+        await set(relRef, { followerId: me, followeeId: userId, createdAt: serverTimestamp() });
+        await update(userRef, { followersCount: (user.followersCount||0) + 1 });
+        btn.classList.remove("bg-blue-500","text-white"); btn.classList.add("bg-gray-200");
+        btn.textContent = "Unfollow";
       }
     });
-  </script>
+  }
+
+  async function isFollowingUser(me, otherId){
+    const snap = await get(ref(db,"follows/"+me+"_"+otherId));
+    return snap.exists();
+  }
+
+  /* =========================
+     Changement de pseudo
+  ==========================*/
+  document.addEventListener("click",(e)=>{
+    if (e.target?.id === "changeName") {
+      const asked = prompt("Nouveau pseudo :")?.trim();
+      if (!asked) return;
+      localStorage.setItem(nameKey, asked);
+      ensureIdentity();
+    }
+  });
+</script>
+
+
 </head>
 <body class="bg-gray-100">
   <header class="bg-white border-b">
     <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
-      <div class="text-xl font-bold">Kyky</div>
+      <div class="text-xl font-bold">- Kyky -</div>
       <div class="flex items-center gap-3">
         <div id="avatarMe" class="w-8 h-8 rounded-full bg-gray-300 flex items-center justify-center text-xs font-semibold text-gray-700">ME</div>
         <div class="text-sm">
