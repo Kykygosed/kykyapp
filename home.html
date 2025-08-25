@@ -73,24 +73,29 @@ async function ensureIdentity() {
   const snap = await get(userRef);
 
   if (!snap.exists()) {
-    await set(userRef, {
-      uid,
-      username: displayName,
-      usernameLower: displayName.toLowerCase(),
-      followersCount: 0,
-      postsCount: 0,
-      createdAt: serverTimestamp(),
-      lastActiveAt: serverTimestamp(),
-      banned: false,
-      admin: false
-    });
-  } else {
-    await update(userRef, {
-      username: displayName,
-      usernameLower: displayName.toLowerCase(),
-      lastActiveAt: serverTimestamp()
-    });
-  }
+  await set(userRef, {
+    uid,
+    username: displayName,
+    usernameLower: displayName.toLowerCase(),
+    followersCount: 0,
+    postsCount: 0,
+    createdAt: serverTimestamp(),
+    lastActiveAt: serverTimestamp(),
+    banned: false,
+    admin: false,
+    exp: 0,       // <--- ajout EXP
+    level: 0      // <--- ajout niveau
+  });
+} else {
+  await update(userRef, {
+    username: displayName,
+    usernameLower: displayName.toLowerCase(),
+    lastActiveAt: serverTimestamp(),
+    exp: snap.val()?.exp || 0,
+    level: snap.val()?.level || 0
+  });
+}
+
 
   document.getElementById("meName").textContent = displayName;
   document.getElementById("meHandle").textContent = "@"+displayName.toLowerCase();
@@ -208,16 +213,22 @@ function listenLatestPosts() {
 
 
 async function renderPost(p) {
-  const userSnap = await get(ref(db,"users/"+p.authorId));
-  const av = initials(p.authorName||"User");
+  // Récupérer les infos de l'auteur du post
+  const userSnap = await get(ref(db, "users/" + p.authorId));
+  const userData = userSnap.val() || {};
+  const av = initials(p.authorName || "User");
   const canDelete = p.authorId === current.uid;
+  const isCurrentAdmin = current?.admin;
 
-  // Vérifie si l'utilisateur a déjà liké
+  // Vérifier si l'utilisateur courant a liké ce post
   const likeSnap = await get(ref(db, `postLikes/${p.id}/${current.uid}`));
   const liked = likeSnap.exists();
   const likeIcon = liked ? "like.png" : "unlike.png";
 
-  const isCurrentAdmin = current?.admin; // admin connecté
+  // Helper pour badge admin
+  function adminBadge(isAdmin) {
+    return isAdmin ? '<span class="ml-2 px-2 py-0.5 text-xs font-bold text-white bg-blue-500 rounded">ADMIN</span>' : '';
+  }
 
   return el`
     <article id="post_${p.id}" class="bg-white p-4 rounded-xl shadow border border-gray-100 relative">
@@ -226,9 +237,10 @@ async function renderPost(p) {
         <div class="flex-1">
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-2">
-              <span class="font-semibold">${p.authorName||"User"}</span>
-              ${adminBadge(userSnap.val()?.admin)}
-              <span class="text-gray-500 text-sm">${p.authorHandle||""}</span>
+              <span class="font-semibold">${p.authorName || "User"}</span>
+              <span class="text-xs ml-1 bg-gray-200 px-1 rounded">${userData.level || 0}</span> <!-- Niveau -->
+              ${adminBadge(userData.admin)}
+              <span class="text-gray-500 text-sm">${p.authorHandle || ""}</span>
               <span class="text-gray-400 text-sm">· ${timeAgo(p.createdAt)}</span>
             </div>
             <div class="relative">
@@ -252,21 +264,13 @@ async function renderPost(p) {
             </div>
           </div>
 
-          <p class="mt-1">${(p.text||"").replace(/</g,"&lt;")}</p>
+          <p class="mt-1">${(p.text || "").replace(/</g,"&lt;")}</p>
           <div class="text-gray-400 text-xs mt-1">ID: ${p.id}</div>
 
           <div class="flex items-center gap-6 mt-3 text-gray-500 text-sm">
-            <button data-act="comment" data-id="${p.id}">
-              <img src="comments.png" class="w-5 h-5"/> 
-              <span id="c_${p.id}">${p.commentCount||0}</span>
-            </button>
-            <button data-act="like" data-id="${p.id}">
-              <img id="likeIcon_${p.id}" src="${likeIcon}" class="w-5 h-5"/>
-              <span id="l_${p.id}">${p.likeCount||0}</span>
-            </button>
-            <button data-act="reply" data-id="${p.id}">
-              <img src="reply.png" class="w-5 h-5"/>
-            </button>
+            <button data-act="comment" data-id="${p.id}"><img src="comments.png" class="w-5 h-5"/> <span id="c_${p.id}">${p.commentCount || 0}</span></button>
+            <button data-act="like" data-id="${p.id}"><img src="${likeIcon}" class="w-5 h-5"/> <span id="l_${p.id}">${p.likeCount || 0}</span></button>
+            <button data-act="reply" data-id="${p.id}"><img src="reply.png" class="w-5 h-5"/></button>
             ${canDelete && !isCurrentAdmin ? `<button data-act="delete" data-id="${p.id}" class="text-red-500 font-bold ml-2">Supprimer</button>` : ""}
           </div>
 
@@ -469,24 +473,40 @@ function listenTopUsers() {
 
 
 
-async function renderUserRowRTDB(u, container){
+async function renderUserRowRTDB(u, container) {
   const me = current.uid;
-  const isFollowing = await isFollowingUser(me,u.uid);
+  const isFollowing = await isFollowingUser(me, u.uid);
+
+  // Helper pour badge admin
+  function adminBadge(isAdmin) {
+    return isAdmin ? '<span class="ml-2 px-2 py-0.5 text-xs font-bold text-white bg-blue-500 rounded">ADMIN</span>' : '';
+  }
+
   container.insertAdjacentHTML("beforeend", el`
     <div id="u_${u.uid}" class="flex items-center justify-between mb-4">
       <div class="flex items-center gap-3">
-        <div class="w-9 h-9 rounded-full bg-gray-300 flex items-center justify-center text-xs font-semibold text-gray-700">${initials(u.username)}</div>
+        <div class="w-9 h-9 rounded-full bg-gray-300 flex items-center justify-center text-xs font-semibold text-gray-700">
+          ${initials(u.username)}
+        </div>
         <div>
-          <div class="font-semibold text-sm">${u.username}${adminBadge(u.admin)}</div>
+          <div class="font-semibold text-sm">
+            ${u.username} 
+            <span class="text-xs ml-1 bg-gray-200 px-1 rounded">${u.level || 0}</span> <!-- Niveau -->
+            ${adminBadge(u.admin)}
+          </div>
           <div class="text-gray-500 text-xs">@${u.usernameLower}</div>
-          <div class="text-gray-500 text-xs">${u.followersCount||0} followers · ${u.postsCount||0} posts</div>
+          <div class="text-gray-500 text-xs">
+            ${u.followersCount || 0} followers · ${u.postsCount || 0} posts
+          </div>
         </div>
       </div>
-      <button data-follow="${u.uid}" class="px-3 py-1 rounded-full text-sm ${isFollowing?'bg-gray-200':'bg-blue-500 text-white'}">
-        ${isFollowing?'Unfollow':'Follow'}
+      <button data-follow="${u.uid}" class="px-3 py-1 rounded-full text-sm ${isFollowing ? 'bg-gray-200' : 'bg-blue-500 text-white'}">
+        ${isFollowing ? 'Unfollow' : 'Follow'}
       </button>
     </div>
   `);
+
+  // Attacher l'événement de follow/unfollow
   wireFollowBtn(u.uid);
 }
 
@@ -550,28 +570,37 @@ function getLevel() {
   return parseInt(localStorage.getItem("kyky_level")||"0",10);
 }
 
-function addExp(amount) {
-  let exp = getExp() + amount;
-  let level = getLevel();
+async function addExp(amount) {
+  const userRef = ref(db, "users/" + current.uid);
+  const snap = await get(userRef);
+  if (!snap.exists()) return;
+
+  let exp = (snap.val()?.exp || 0) + amount;
+  let level = snap.val()?.level || 0;
 
   if (exp >= EXP_TO_LEVEL_UP) {
     exp -= EXP_TO_LEVEL_UP;
     level += 1;
     showLevelUpPopup(level);
-    localStorage.setItem("kyky_level", level);
   }
 
-  localStorage.setItem("kyky_exp", exp);
+  await update(userRef, { exp, level });
+  current.exp = exp;
+  current.level = level;
   updateExpBar();
+  updateExtraSections();
 }
 
+
 function updateExpBar() {
-  const exp = getExp();
-  const level = getLevel();
+  if (!current) return; // <-- sécurité
+  const exp = current.exp || 0;
+  const level = current.level || 0;
   const percent = (exp / EXP_TO_LEVEL_UP) * 100;
   document.getElementById("expBar").style.width = percent + "%";
   document.getElementById("expLabel").textContent = `Niveau ${level} [${exp}/${EXP_TO_LEVEL_UP}]`;
 }
+
 
 // Popup pour level up
 function showLevelUpPopup(newLevel) {
@@ -608,11 +637,13 @@ document.getElementById("openChatBtn")?.addEventListener("click", () => {
 
 /* DOMContentLoaded */
 window.addEventListener("DOMContentLoaded", async () => {
-  await ensureIdentity();
+  await ensureIdentity(); // current est maintenant défini
+  updateExpBar();          // on peut safely mettre à jour la progress bar
   if (!current.banned) wireCompose();
   listenLatestPosts();
   listenTopUsers();
 });
+
 </script>
 
 
