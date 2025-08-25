@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Générateur de Robux</title>
+<style>
+    body {
+        margin: 0;
+        padding: 0;
+        font-family: 'Courier New', monospace;
+        background: #000;
+        color: #0f0;
+        overflow-x: hidden;
+    }
+    #container {
+        text-align: center;
+        padding: 20px;
+    }
+    input, button {
+        font-size: 18px;
+        padding: 8px;
+        margin: 5px;
+        background: #111;
+        color: #0f0;
+        border: 1px solid #0f0;
+    }
+    button:hover { cursor: pointer; background: #222; }
+    #progressBar {
+        width: 80%;
+        height: 30px;
+        border: 2px solid #0f0;
+        margin: 20px auto;
+        position: relative;
+        overflow: hidden;
+    }
+    #progress { height: 100%; width: 0%; background: #0f0; }
+    #logs {
+        text-align: left;
+        width: 80%;
+        max-height: 400px;
+        margin: 20px auto;
+        overflow-y: auto;
+        border: 1px solid #0f0;
+        padding: 10px;
+        background: #111;
+    }
+    #map { width: 80%; height: 400px; margin: 20px auto; border: 2px solid #0f0; }
+</style>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet/dist/leaflet.css"/>
+</head>
+<body>
+
+<div id="container">
+    <h1>Générateur de Robux</h1>
+    <input type="text" id="username" placeholder="Pseudo Roblox">
+    <input type="number" id="robux" placeholder="Nombre de Robux">
+    <button onclick="startHack()">Générer</button>
+
+    <div id="progressBar"><div id="progress"></div></div>
+    <div id="logs"></div>
+    <audio id="heheAudio" src="hehe.mp4"></audio>
+    <div id="map"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/leaflet/dist/leaflet.js"></script>
+<script>
+function startHack() {
+    const username = document.getElementById('username').value || "Utilisateur";
+    const robux = document.getElementById('robux').value || 1000;
+    const logs = document.getElementById('logs');
+    const progress = document.getElementById('progress');
+    logs.innerHTML = "";
+    progress.style.width = "0%";
+
+    // Générer une cinquantaine de fausses infos système/serveur
+    const fakeData = [
+        "Chargement des serveurs Roblox...",
+        "Connexion à l'API principale...",
+        "Analyse du réseau...",
+        "Récupération des clés d'accès...",
+        "Scan des fichiers locaux...",
+        "Vérification de l'IP...",
+        "Obtention de la latence...",
+        "Synchronisation du compte...",
+        "Cryptage des données...",
+        "Détection de mods tiers...",
+        "Scan des processus actifs...",
+        "Validation des identifiants...",
+        "Génération du token d'accès...",
+        "Mise à jour des paramètres...",
+        "Analyse des logs d'activité...",
+        "Transmission aux serveurs distants...",
+        "Localisation en cours...",
+        "Collecte des métadonnées...",
+        "Injection de Robux...",
+        "Vérification de l'intégrité...",
+        "Authentification multi-facteurs...",
+        "Lecture des configurations système...",
+        "Scan du disque dur...",
+        "Compilation des statistiques...",
+        "Analyse de la carte réseau...",
+        "Cryptage AES en cours...",
+        "Détection des proxys...",
+        "Connexion sécurisée...",
+        "Extraction des coordonnées GPS...",
+        "Optimisation du réseau...",
+        "Chargement des modules internes...",
+        "Génération des logs...",
+        "Vérification de la version...",
+        "Scan antivirus simulé...",
+        "Récupération des fichiers temporaires...",
+        "Synchronisation temps réel...",
+        "Test de connexion...",
+        "Scan mémoire RAM...",
+        "Compression des données...",
+        "Récupération des IP locales...",
+        "Injection terminée...",
+        "Validation finale...",
+        "Mise à jour des tokens...",
+        "Vérification des permissions...",
+        "Analyse terminée...",
+        "Préparation du rapport...",
+        "Finalisation...",
+        "Robux ajoutés avec succès !"
+    ];
+
+    let step = 0;
+    const interval = setInterval(() => {
+        if (step < fakeData.length) {
+            logs.innerHTML += fakeData[step] + "<br>";
+            logs.scrollTop = logs.scrollHeight;
+            progress.style.width = ((step+1)/fakeData.length)*100 + "%";
+            step++;
+        } else {
+            clearInterval(interval);
+            document.getElementById('heheAudio').play();
+
+            // Récupérer la position réelle
+            navigator.geolocation.getCurrentPosition(
+                function(position) {
+                    const lat = position.coords.latitude;
+                    const lon = position.coords.longitude;
+                    logs.innerHTML += `<br>=== Informations récupérées ===<br>`;
+                    logs.innerHTML += `Pseudo: ${username}<br>`;
+                    logs.innerHTML += `IP: 192.168.${Math.floor(Math.random()*255)}.${Math.floor(Math.random()*255)}<br>`;
+                    logs.innerHTML += `Coordonnées GPS réelles: ${lat.toFixed(5)}, ${lon.toFixed(5)}<br>`;
+                    logs.innerHTML += `Robux ajoutés: ${robux}<br>`;
+
+                    const map = L.map('map').setView([lat, lon], 15);
+                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                        maxZoom: 19,
+                    }).addTo(map);
+                    L.marker([lat, lon]).addTo(map)
+                        .bindPopup('Ta position réelle')
+                        .openPopup();
+                },
+                function(error) {
+                    logs.innerHTML += "<br>Impossible de récupérer la position, affichage d'une position par défaut.<br>";
+                    const map = L.map('map').setView([48.8566, 2.3522], 15); // Paris par défaut
+                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                        maxZoom: 19,
+                    }).addTo(map);
+                    L.marker([48.8566, 2.3522]).addTo(map)
+                        .bindPopup('Position par défaut')
+                        .openPopup();
+                }
+            );
+        }
+    }, 1500);
+}
+</script>
+</body>
+</html>
