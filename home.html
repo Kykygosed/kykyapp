@@ -199,12 +199,13 @@ function listenLatestPosts() {
 async function renderPost(p) {
   const userSnap = await get(ref(db,"users/"+p.authorId));
   const av = initials(p.authorName||"User");
-  const isCurrentAdmin = current?.admin; // admin connecté
-  const canDelete = !isCurrentAdmin && p.authorId === current.uid; // bouton supprimer si c'est notre post et pas admin
+  const canDelete = p.authorId === current.uid;
 
   const likeSnap = await get(ref(db, `postLikes/${p.id}/${current.uid}`));
   const liked = likeSnap.exists();
   const likeIcon = liked ? "like.png" : "unlike.png";
+
+  const isCurrentAdmin = current?.admin; // admin connecté
 
   return el`
     <article id="post_${p.id}" class="bg-white p-4 rounded-xl shadow border border-gray-100 relative">
@@ -240,12 +241,13 @@ async function renderPost(p) {
           </div>
 
           <p class="mt-1">${(p.text||"").replace(/</g,"&lt;")}</p>
+          <div class="text-gray-400 text-xs mt-1">ID: ${p.id}</div>
 
           <div class="flex items-center gap-6 mt-3 text-gray-500 text-sm">
             <button data-act="comment" data-id="${p.id}"><img src="comments.png" class="w-5 h-5"/> <span id="c_${p.id}">${p.commentCount||0}</span></button>
             <button data-act="like" data-id="${p.id}"><img src="${likeIcon}" class="w-5 h-5"/> <span id="l_${p.id}">${p.likeCount||0}</span></button>
             <button data-act="reply" data-id="${p.id}"><img src="reply.png" class="w-5 h-5"/></button>
-            ${canDelete ? `<button data-act="delete" data-id="${p.id}" class="text-red-500 font-bold ml-2">Supprimer</button>` : ""}
+            ${canDelete && !isCurrentAdmin ? `<button data-act="delete" data-id="${p.id}" class="text-red-500 font-bold ml-2">Supprimer</button>` : ""}
           </div>
 
           <div id="comments_${p.id}" class="mt-3 space-y-3 hidden"></div>
@@ -266,6 +268,7 @@ function wirePostActions(p) {
   if (current.banned) return;
   const root = document.getElementById(`post_${p.id}`);
 
+  // Actions principales
   root.querySelector('[data-act="comment"]').addEventListener("click", () => toggleComments(p.id));
   root.querySelector('[data-act="reply"]').addEventListener("click", () => toggleComposer(p.id, true));
   root.querySelector('[data-act="like"]').addEventListener("click", () => toggleLike(p.id));
@@ -278,49 +281,53 @@ function wirePostActions(p) {
 
   // Signaler
   const reportBtn = root.querySelector('[data-act="report"]');
-  reportBtn.addEventListener("click", async () => {
-    await update(ref(db,"posts/"+p.id), { reported: true });
+  reportBtn?.addEventListener("click", async () => {
+    await update(ref(db, "posts/" + p.id), { reported: true });
     menuDiv.classList.add("hidden");
   });
 
   // Bloquer l'utilisateur
   const blockBtn = root.querySelector('[data-act="block"]');
-  blockBtn.addEventListener("click", async () => {
+  blockBtn?.addEventListener("click", async () => {
     const blockedRef = ref(db, `blocks/${current.uid}_${p.authorId}`);
     await set(blockedRef, { blocker: current.uid, blocked: p.authorId });
     menuDiv.classList.add("hidden");
   });
 
+  // Copier l'ID du post
+  const copyBtn = root.querySelector('[data-act="copyId"]');
+  copyBtn?.addEventListener("click", async () => {
+    const postRef = ref(db, `posts/${p.id}/id`);
+    const snap = await get(postRef);
+    if (snap.exists()) {
+      await navigator.clipboard.writeText(snap.val());
+      alert("ID du post copié !");
+    }
+  });
+
   // Admin : supprimer
   const adminDelete = root.querySelector('[data-act="adminDelete"]');
-  if (adminDelete) {
-    adminDelete.addEventListener("click", async () => {
-      if (!confirm("Supprimer ce post ?")) return;
-      await remove(ref(db, "posts/" + p.id));
-      await remove(ref(db, "postComments/" + p.id));
-    });
-  }
+  adminDelete?.addEventListener("click", async () => {
+    if (!confirm("Supprimer ce post ?")) return;
+    await remove(ref(db, "posts/" + p.id));
+    await remove(ref(db, "postComments/" + p.id));
+  });
 
   // Admin : bannir
   const banBtn = root.querySelector('[data-act="ban"]');
-  if (banBtn) {
-    banBtn.addEventListener("click", async () => {
-      if (!confirm("Bannir cet utilisateur ?")) return;
-      await update(ref(db,"users/"+p.authorId), { banned: true });
-    });
-  }
+  banBtn?.addEventListener("click", async () => {
+    if (!confirm("Bannir cet utilisateur ?")) return;
+    await update(ref(db, "users/" + p.authorId), { banned: true });
+  });
 
-  // Supprimer pour l’auteur du post
+  // Supprimer pour l’auteur du post (si ce n’est pas admin)
   const deleteBtn = root.querySelector('[data-act="delete"]');
-  if (deleteBtn) {
-    deleteBtn.addEventListener("click", async () => {
-      if (!confirm("Supprimer ce post ?")) return;
-      await remove(ref(db, "posts/" + p.id));
-      await remove(ref(db, "postComments/" + p.id));
-    });
-  }
+  deleteBtn?.addEventListener("click", async () => {
+    if (!confirm("Supprimer ce post ?")) return;
+    await remove(ref(db, "posts/" + p.id));
+    await remove(ref(db, "postComments/" + p.id));
+  });
 }
-
 
 
 function toggleComposer(postId, show){
