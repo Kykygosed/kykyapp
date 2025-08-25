@@ -203,6 +203,7 @@ async function renderPost(p) {
   const av = initials(p.authorName||"User");
   const canDelete = p.authorId === current.uid;
 
+  // Vérifie si l'utilisateur a déjà liké
   const likeSnap = await get(ref(db, `postLikes/${p.id}/${current.uid}`));
   const liked = likeSnap.exists();
   const likeIcon = liked ? "like.png" : "unlike.png";
@@ -246,9 +247,17 @@ async function renderPost(p) {
           <div class="text-gray-400 text-xs mt-1">ID: ${p.id}</div>
 
           <div class="flex items-center gap-6 mt-3 text-gray-500 text-sm">
-            <button data-act="comment" data-id="${p.id}"><img src="comments.png" class="w-5 h-5"/> <span id="c_${p.id}">${p.commentCount||0}</span></button>
-            <button data-act="like" data-id="${p.id}"><img src="${likeIcon}" class="w-5 h-5"/> <span id="l_${p.id}">${p.likeCount||0}</span></button>
-            <button data-act="reply" data-id="${p.id}"><img src="reply.png" class="w-5 h-5"/></button>
+            <button data-act="comment" data-id="${p.id}">
+              <img src="comments.png" class="w-5 h-5"/> 
+              <span id="c_${p.id}">${p.commentCount||0}</span>
+            </button>
+            <button data-act="like" data-id="${p.id}">
+              <img id="likeIcon_${p.id}" src="${likeIcon}" class="w-5 h-5"/>
+              <span id="l_${p.id}">${p.likeCount||0}</span>
+            </button>
+            <button data-act="reply" data-id="${p.id}">
+              <img src="reply.png" class="w-5 h-5"/>
+            </button>
             ${canDelete && !isCurrentAdmin ? `<button data-act="delete" data-id="${p.id}" class="text-red-500 font-bold ml-2">Supprimer</button>` : ""}
           </div>
 
@@ -264,6 +273,7 @@ async function renderPost(p) {
     </article>
   `;
 }
+
 
   
 function wirePostActions(p) {
