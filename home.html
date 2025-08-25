@@ -169,8 +169,6 @@ function listenLatestPosts() {
   const postsRef = ref(db, "posts");
   onValue(postsRef, async (snap) => {
     const wrap = document.getElementById("feed");
-    wrap.innerHTML = "";
-
     const posts = snap.val();
     if (!posts) return;
 
@@ -178,22 +176,26 @@ function listenLatestPosts() {
     const blocksSnap = await get(ref(db, "blocks"));
     const blocks = blocksSnap.val() || {};
 
-    // Filtrer les posts bloqués
-    const visiblePosts = Object.values(posts)
+    Object.values(posts)
       .filter(p => !blocks[`${current.uid}_${p.authorId}`])
       .sort((a,b)=>b.createdAt - a.createdAt)
-      .slice(0,25);
-
-    // Affichage des posts visibles
-    visiblePosts.forEach(p => {
-      renderPost(p).then(html => {
-        wrap.insertAdjacentHTML("beforeend", html);
-        wirePostActions(p);
-        listenCountsLive(p.id);
+      .slice(0,25)
+      .forEach(async p => {
+        const existing = document.getElementById(`post_${p.id}`);
+        if (existing) {
+          // Mettre à jour counts seulement
+          document.getElementById(`l_${p.id}`).textContent = p.likeCount || 0;
+          document.getElementById(`c_${p.id}`).textContent = p.commentCount || 0;
+        } else {
+          const html = await renderPost(p);
+          wrap.insertAdjacentHTML("beforeend", html);
+          wirePostActions(p);
+          listenCountsLive(p.id);
+        }
       });
-    });
   });
 }
+
 
 
 async function renderPost(p) {
