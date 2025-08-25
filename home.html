@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8" />
-  <title>Kyky — Mini Twitter</title>
+  <title>Kyky</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <script src="https://cdn.tailwindcss.com"></script>
 <script type="module">
@@ -73,44 +73,59 @@ async function ensureIdentity() {
   const snap = await get(userRef);
 
   if (!snap.exists()) {
-  await set(userRef, {
+    await set(userRef, {
+      uid,
+      username: displayName,
+      usernameLower: displayName.toLowerCase(),
+      followersCount: 0,
+      postsCount: 0,
+      createdAt: serverTimestamp(),
+      lastActiveAt: serverTimestamp(),
+      banned: false,
+      admin: false,
+      exp: 0,   // EXP initial
+      level: 0  // Niveau initial
+    });
+  } else {
+    await update(userRef, {
+      username: displayName,
+      usernameLower: displayName.toLowerCase(),
+      lastActiveAt: serverTimestamp()
+    });
+  }
+
+  // Remplir current avec toutes les infos nécessaires
+  current = {
     uid,
-    username: displayName,
-    usernameLower: displayName.toLowerCase(),
-    followersCount: 0,
-    postsCount: 0,
-    createdAt: serverTimestamp(),
-    lastActiveAt: serverTimestamp(),
-    banned: false,
-    admin: false,
-    exp: 0,       // <--- ajout EXP
-    level: 0      // <--- ajout niveau
-  });
-} else {
-  await update(userRef, {
-    username: displayName,
-    usernameLower: displayName.toLowerCase(),
-    lastActiveAt: serverTimestamp(),
+    displayName,
+    banned: snap.val()?.banned || false,
+    admin: snap.val()?.admin || false,
     exp: snap.val()?.exp || 0,
     level: snap.val()?.level || 0
-  });
-}
+  };
 
+  // Mettre à jour la progress bar dès le chargement
+  updateExpBar();
+  updateExtraSections(); // Si niveau >=1, afficher les sections supplémentaires
 
-  document.getElementById("meName").textContent = displayName;
-  document.getElementById("meHandle").textContent = "@"+displayName.toLowerCase();
-  document.getElementById("avatarMe").textContent = initials(displayName);
-
-  current = { uid, displayName, banned: snap.val()?.banned || false, admin: snap.val()?.admin || false };
-
-  onValue(userRef, (snap)=>{
+  // Surveiller bannissement en temps réel
+  onValue(userRef, (snap) => {
     const banned = snap.val()?.banned || false;
     current.banned = banned;
+    current.exp = snap.val()?.exp || 0;
+    current.level = snap.val()?.level || 0;
+    updateExpBar();
     if (banned) showBannedMessage();
   });
 
+  // Mettre le pseudo dans le DOM
+  document.getElementById("meName").textContent = displayName;
+  document.getElementById("meHandle").textContent = "@" + displayName.toLowerCase();
+  document.getElementById("avatarMe").textContent = initials(displayName);
+
   return current;
 }
+
 
 /* Bannissement */
 function showBannedMessage() {
@@ -637,12 +652,12 @@ document.getElementById("openChatBtn")?.addEventListener("click", () => {
 
 /* DOMContentLoaded */
 window.addEventListener("DOMContentLoaded", async () => {
-  await ensureIdentity(); // current est maintenant défini
-  updateExpBar();          // on peut safely mettre à jour la progress bar
+  await ensureIdentity(); // récupère EXP et niveau depuis Firebase
   if (!current.banned) wireCompose();
   listenLatestPosts();
   listenTopUsers();
 });
+
 
 </script>
 
