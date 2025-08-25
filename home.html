@@ -164,69 +164,92 @@ function wireCompose() {
   });
 }
 
+
 function listenLatestPosts() {
   const postsRef = ref(db, "posts");
-  onValue(postsRef, (snap) => {
+  onValue(postsRef, async (snap) => {
     const wrap = document.getElementById("feed");
     wrap.innerHTML = "";
+
     const posts = snap.val();
     if (!posts) return;
-    Object.values(posts)
+
+    // Récupérer la liste des blocs pour l'utilisateur courant
+    const blocksSnap = await get(ref(db, "blocks"));
+    const blocks = blocksSnap.val() || {};
+
+    // Filtrer les posts bloqués
+    const visiblePosts = Object.values(posts)
+      .filter(p => !blocks[`${current.uid}_${p.authorId}`])
       .sort((a,b)=>b.createdAt - a.createdAt)
-      .slice(0,25)
-      .forEach(p => {
-        renderPost(p).then(html => {
-          wrap.insertAdjacentHTML("beforeend", html);
-          wirePostActions(p);
-          listenCountsLive(p.id);
-        });
+      .slice(0,25);
+
+    // Affichage des posts visibles
+    visiblePosts.forEach(p => {
+      renderPost(p).then(html => {
+        wrap.insertAdjacentHTML("beforeend", html);
+        wirePostActions(p);
+        listenCountsLive(p.id);
       });
+    });
   });
 }
 
 
 async function renderPost(p) {
   const userSnap = await get(ref(db,"users/"+p.authorId));
-  const isAdmin = userSnap.val()?.admin || false;
   const av = initials(p.authorName||"User");
+  const canDelete = p.authorId === current.uid;
 
-  // On vérifie si l'utilisateur a déjà liké ce post
   const likeSnap = await get(ref(db, `postLikes/${p.id}/${current.uid}`));
   const liked = likeSnap.exists();
   const likeIcon = liked ? "like.png" : "unlike.png";
 
+  const isCurrentAdmin = current?.admin; // admin connecté
+
   return el`
-    <article id="post_${p.id}" class="bg-white p-4 rounded-xl shadow border border-gray-100">
+    <article id="post_${p.id}" class="bg-white p-4 rounded-xl shadow border border-gray-100 relative">
       <div class="flex items-start space-x-4">
         <div class="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center font-semibold text-gray-700">${av}</div>
         <div class="flex-1">
-          <div class="flex items-center gap-2">
-            <span class="font-semibold">${p.authorName||"User"}</span>
-            ${adminBadge(isAdmin)}
-            <span class="text-gray-500 text-sm">${p.authorHandle||""}</span>
-            <span class="text-gray-400 text-sm">· ${timeAgo(p.createdAt)}</span>
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="font-semibold">${p.authorName||"User"}</span>
+              ${adminBadge(userSnap.val()?.admin)}
+              <span class="text-gray-500 text-sm">${p.authorHandle||""}</span>
+              <span class="text-gray-400 text-sm">· ${timeAgo(p.createdAt)}</span>
+            </div>
+            <div class="relative">
+              <button data-act="menu" class="px-2">⋮</button>
+              <div id="menu_${p.id}" class="absolute right-0 mt-1 w-44 bg-white border rounded shadow-lg hidden z-10">
+                <button data-act="report" data-id="${p.id}" class="flex items-center gap-2 w-full px-2 py-1 hover:bg-gray-100">
+                  <img src="report.png" class="w-4 h-4"/> Signaler
+                </button>
+                <button data-act="block" data-author="${p.authorId}" class="flex items-center gap-2 w-full px-2 py-1 hover:bg-gray-100">
+                  <img src="block.png" class="w-4 h-4"/> Bloquer l'utilisateur
+                </button>
+                ${isCurrentAdmin ? `
+                  <button data-act="adminDelete" data-id="${p.id}" class="flex items-center gap-2 w-full px-2 py-1 text-red-600 hover:bg-gray-100">
+                    <img src="delete.png" class="w-4 h-4"/> Supprimer
+                  </button>
+                  <button data-act="ban" data-author="${p.authorId}" class="flex items-center gap-2 w-full px-2 py-1 text-red-600 hover:bg-gray-100">
+                    <img src="block.png" class="w-4 h-4"/> Bannir
+                  </button>
+                ` : ""}
+              </div>
+            </div>
           </div>
+
           <p class="mt-1">${(p.text||"").replace(/</g,"&lt;")}</p>
 
-          <!-- Actions avec images -->
           <div class="flex items-center gap-6 mt-3 text-gray-500 text-sm">
-            <button data-act="comment" data-id="${p.id}">
-              <img src="comments.png" class="w-5 h-5"/>
-              <span id="c_${p.id}">${p.commentCount||0}</span>
-            </button>
-            <button data-act="like" data-id="${p.id}">
-              <img src="${likeIcon}" class="w-5 h-5"/>
-              <span id="l_${p.id}">${p.likeCount||0}</span>
-            </button>
-            <button data-act="reply" data-id="${p.id}">
-              <img src="reply.png" class="w-5 h-5"/>
-            </button>
+            <button data-act="comment" data-id="${p.id}"><img src="comments.png" class="w-5 h-5"/> <span id="c_${p.id}">${p.commentCount||0}</span></button>
+            <button data-act="like" data-id="${p.id}"><img src="${likeIcon}" class="w-5 h-5"/> <span id="l_${p.id}">${p.likeCount||0}</span></button>
+            <button data-act="reply" data-id="${p.id}"><img src="reply.png" class="w-5 h-5"/></button>
+            ${canDelete && !isCurrentAdmin ? `<button data-act="delete" data-id="${p.id}" class="text-red-500 font-bold ml-2">Supprimer</button>` : ""}
           </div>
 
-          <!-- Liste des commentaires -->
           <div id="comments_${p.id}" class="mt-3 space-y-3 hidden"></div>
-
-          <!-- Composer un commentaire -->
           <div id="composer_${p.id}" class="mt-3 hidden">
             <textarea id="input_${p.id}" rows="2" class="w-full border rounded-lg p-2" placeholder="Écrire un commentaire…"></textarea>
             <div class="flex justify-end mt-2">
@@ -239,16 +262,67 @@ async function renderPost(p) {
   `;
 }
 
-
-/* Post Actions */
-function wirePostActions(p){
+  
+function wirePostActions(p) {
   if (current.banned) return;
   const root = document.getElementById(`post_${p.id}`);
+
   root.querySelector('[data-act="comment"]').addEventListener("click", () => toggleComments(p.id));
   root.querySelector('[data-act="reply"]').addEventListener("click", () => toggleComposer(p.id, true));
   root.querySelector('[data-act="like"]').addEventListener("click", () => toggleLike(p.id));
   root.querySelector('[data-act="sendComment"]').addEventListener("click", () => sendComment(p.id));
+
+  // Menu contextuel
+  const menuBtn = root.querySelector('[data-act="menu"]');
+  const menuDiv = root.querySelector(`#menu_${p.id}`);
+  menuBtn.addEventListener("click", () => menuDiv.classList.toggle("hidden"));
+
+  // Signaler
+  const reportBtn = root.querySelector('[data-act="report"]');
+  reportBtn.addEventListener("click", async () => {
+    await update(ref(db,"posts/"+p.id), { reported: true });
+    menuDiv.classList.add("hidden");
+  });
+
+  // Bloquer l'utilisateur
+  const blockBtn = root.querySelector('[data-act="block"]');
+  blockBtn.addEventListener("click", async () => {
+    const blockedRef = ref(db, `blocks/${current.uid}_${p.authorId}`);
+    await set(blockedRef, { blocker: current.uid, blocked: p.authorId });
+    menuDiv.classList.add("hidden");
+  });
+
+  // Admin : supprimer
+  const adminDelete = root.querySelector('[data-act="adminDelete"]');
+  if (adminDelete) {
+    adminDelete.addEventListener("click", async () => {
+      if (!confirm("Supprimer ce post ?")) return;
+      await remove(ref(db, "posts/" + p.id));
+      await remove(ref(db, "postComments/" + p.id));
+    });
+  }
+
+  // Admin : bannir
+  const banBtn = root.querySelector('[data-act="ban"]');
+  if (banBtn) {
+    banBtn.addEventListener("click", async () => {
+      if (!confirm("Bannir cet utilisateur ?")) return;
+      await update(ref(db,"users/"+p.authorId), { banned: true });
+    });
+  }
+
+  // Supprimer pour l’auteur du post
+  const deleteBtn = root.querySelector('[data-act="delete"]');
+  if (deleteBtn) {
+    deleteBtn.addEventListener("click", async () => {
+      if (!confirm("Supprimer ce post ?")) return;
+      await remove(ref(db, "posts/" + p.id));
+      await remove(ref(db, "postComments/" + p.id));
+    });
+  }
 }
+
+
 
 function toggleComposer(postId, show){
   const box = document.getElementById(`composer_${postId}`);
