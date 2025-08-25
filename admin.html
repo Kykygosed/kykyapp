@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Playlist par jour — Kyky</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
+    .day-tab.active { background: rgb(15 23 42); color: white; }
+  </style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+  <header class="sticky top-0 z-10 bg-white/80 backdrop-blur border-b border-slate-200">
+    <div class="max-w-6xl mx-auto px-4 py-4 flex items-center gap-4">
+      <div class="text-2xl font-bold">🎧 Kyky — Playlists par jour</div>
+      <div class="ml-auto flex items-center gap-2">
+        <span id="user-info" class="text-sm text-slate-600 hidden"></span>
+        <button id="signin" class="px-3 py-1.5 rounded-xl bg-slate-900 text-white text-sm">Se connecter</button>
+        <button id="signout" class="px-3 py-1.5 rounded-xl bg-slate-200 text-slate-900 text-sm hidden">Se déconnecter</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-4 py-6">
+    <!-- Bloc recherche -->
+    <section class="mb-8">
+      <div class="grid md:grid-cols-[1fr_auto] gap-3 items-center">
+        <div class="relative">
+          <input id="search-input" type="text" placeholder="Rechercher des musiques (ex: Aya Nakamura, rap, lo-fi)…" class="w-full px-4 py-3 rounded-2xl border border-slate-300 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-900"/>
+          <button id="search-btn" class="absolute right-2 top-1/2 -translate-y-1/2 px-3 py-1.5 rounded-xl bg-slate-900 text-white text-sm">Rechercher</button>
+        </div>
+        <div class="text-sm text-slate-500 px-2">Source: iTunes Search API (30s preview)</div>
+      </div>
+      <div id="results" class="mt-4 grid gap-3"></div>
+    </section>
+
+    <!-- Onglets jours -->
+    <section>
+      <div class="flex flex-wrap gap-2 mb-4" id="day-tabs"></div>
+      <div id="playlist" class="grid md:grid-cols-2 gap-3"></div>
+    </section>
+  </main>
+
+  <!-- Lecteur audio (unique) -->
+  <audio id="player" controls class="fixed bottom-3 left-1/2 -translate-x-1/2 w-[90%] md:w-[60%] bg-white/90 backdrop-blur rounded-2xl shadow-lg p-2"></audio>
+
+  <!-- Firebase SDKs (compat pour simplicité) -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+  <script type="module">
+    // --- CONFIG FIREBASE fournie par l'utilisateur ---
+    const firebaseConfig = {
+      apiKey: "AIzaSyDFfUnu076ChN_Js0QYmaABdJJMOQbGv1Q",
+      authDomain: "kyky-4b748.firebaseapp.com",
+      databaseURL: "https://kyky-4b748-default-rtdb.firebaseio.com",
+      projectId: "kyky-4b748",
+      storageBucket: "kyky-4b748.firebasestorage.app",
+      messagingSenderId: "980205708455",
+      appId: "1:980205708455:web:b9125afa8028f65b042782",
+      measurementId: "G-HDMXRP2FP0"
+    };
+
+    // --- Init Firebase ---
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+
+    // --- Constantes UI ---
+    const DAYS = [
+      { key: 'lundi', label: 'Lundi' },
+      { key: 'mardi', label: 'Mardi' },
+      { key: 'mercredi', label: 'Mercredi' },
+      { key: 'jeudi', label: 'Jeudi' },
+      { key: 'vendredi', label: 'Vendredi' },
+      { key: 'samedi', label: 'Samedi' },
+      { key: 'dimanche', label: 'Dimanche' },
+    ];
+
+    let currentUser = null;
+    let currentDayKey = DAYS[0].key;
+    const unsubscribeListeners = new Map();
+
+    // --- Helpers Firestore ---
+    const userDoc = () => db.collection('users').doc(currentUser.uid);
+    const playlistTracksCol = (dayKey) => userDoc().collection('playlists').doc(dayKey).collection('tracks');
+
+    // --- Auth UI ---
+    const signinBtn = document.getElementById('signin');
+    const signoutBtn = document.getElementById('signout');
+    const userInfo = document.getElementById('user-info');
+
+    signinBtn.addEventListener('click', async () => {
+      const provider = new firebase.auth.GoogleAuthProvider();
+      await auth.signInWithPopup(provider);
+    });
+
+    signoutBtn.addEventListener('click', async () => {
+      await auth.signOut();
+    });
+
+    auth.onAuthStateChanged(async (user) => {
+      currentUser = user;
+      if (user) {
+        userInfo.textContent = `Connecté: ${user.displayName || user.email}`;
+        userInfo.classList.remove('hidden');
+        signinBtn.classList.add('hidden');
+        signoutBtn.classList.remove('hidden');
+        ensureUserDoc();
+        renderDayTabs();
+        switchDay(currentDayKey);
+      } else {
+        userInfo.classList.add('hidden');
+        signinBtn.classList.remove('hidden');
+        signoutBtn.classList.add('hidden');
+        document.getElementById('playlist').innerHTML = uiCardInfo('Connecte-toi pour voir/éditer tes playlists.');
+      }
+    });
+
+    async function ensureUserDoc() {
+      const docRef = userDoc();
+      const snap = await docRef.get();
+      if (!snap.exists) {
+        await docRef.set({ createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+      }
+      // Créer les doc playlists des 7 jours si manquants
+      for (const {key} of DAYS) {
+        const dayDoc = userDoc().collection('playlists').doc(key);
+        if (!(await dayDoc.get()).exists) {
+          await dayDoc.set({ day: key, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+        }
+      }
+    }
+
+    // --- Recherche (iTunes Search API) ---
+    const searchInput = document.getElementById('search-input');
+    const searchBtn = document.getElementById('search-btn');
+    const resultsEl = document.getElementById('results');
+
+    async function searchTracks(term) {
+      if (!term || term.trim().length < 2) {
+        resultsEl.innerHTML = uiCardInfo('Tape au moins 2 caractères pour rechercher.');
+        return;
+      }
+      resultsEl.innerHTML = uiCardLoading('Recherche…');
+      try {
+        const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&entity=song&limit=24&lang=fr_fr`;
+        const res = await fetch(url);
+        const data = await res.json();
+        const tracks = (data.results || []).map(t => ({
+          id: String(t.trackId),
+          title: t.trackName,
+          artist: t.artistName,
+          artwork: t.artworkUrl100,
+          previewUrl: t.previewUrl,
+          trackUrl: t.trackViewUrl,
+          source: 'itunes'
+        }));
+        renderSearchResults(tracks);
+      } catch (e) {
+        console.error(e);
+        resultsEl.innerHTML = uiCardError("Échec de la recherche. Réessaie.");
+      }
+    }
+
+    searchBtn.addEventListener('click', () => searchTracks(searchInput.value));
+    searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') searchTracks(searchInput.value); });
+
+    function renderSearchResults(tracks) {
+      if (!currentUser) {
+        resultsEl.innerHTML = uiCardInfo('Connecte-toi pour ajouter des sons.');
+        return;
+      }
+      if (!tracks.length) {
+        resultsEl.innerHTML = uiCardInfo('Aucun résultat.');
+        return;
+      }
+      resultsEl.innerHTML = '';
+      const grid = document.createElement('div');
+      grid.className = 'grid md:grid-cols-2 lg:grid-cols-3 gap-3';
+
+      for (const tr of tracks) {
+        const card = document.createElement('div');
+        card.className = 'p-3 rounded-2xl bg-white border border-slate-200 shadow-sm flex gap-3';
+        card.innerHTML = `
+          <img src="${tr.artwork.replace('100x100', '200x200')}" alt="artwork" class="w-16 h-16 rounded-xl object-cover"/>
+          <div class="flex-1 min-w-0">
+            <div class="font-semibold truncate">${escapeHtml(tr.title)}</div>
+            <div class="text-sm text-slate-600 truncate">${escapeHtml(tr.artist)}</div>
+            <div class="mt-2 flex flex-wrap gap-1">${DAYS.map(d => `<button data-day="${d.key}" class="add-btn px-2 py-1 rounded-lg bg-slate-900 text-white text-xs">${d.label}</button>`).join('')}</div>
+          </div>
+          <div class="flex flex-col gap-2 items-end">
+            <button class="play-btn text-sm px-2 py-1 rounded-lg bg-slate-200">▶️</button>
+            <a href="${tr.trackUrl}" target="_blank" class="text-xs text-slate-600 underline">Ouvrir</a>
+          </div>`;
+
+        card.querySelector('.play-btn').addEventListener('click', () => playPreview(tr.previewUrl));
+        card.querySelectorAll('.add-btn').forEach(btn => btn.addEventListener('click', async (e) => {
+          const day = e.currentTarget.getAttribute('data-day');
+          await addTrackToDay(day, tr);
+          if (day === currentDayKey) {
+            // Rien à faire, onSnapshot mettra à jour
+          }
+          toast(`${tr.title} ➜ ${capitalize(day)}`);
+        }));
+
+        grid.appendChild(card);
+      }
+      resultsEl.appendChild(grid);
+    }
+
+    // --- Lecture preview ---
+    const player = document.getElementById('player');
+    function playPreview(url) {
+      if (!url) { toast('Aucun extrait dispo'); return; }
+      player.src = url;
+      player.play();
+    }
+
+    // --- CRUD Playlists ---
+    async function addTrackToDay(dayKey, track) {
+      const docRef = playlistTracksCol(dayKey).doc(track.id);
+      await docRef.set({
+        ...track,
+        addedAt: firebase.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+    }
+
+    async function removeTrack(dayKey, trackId) {
+      await playlistTracksCol(dayKey).doc(trackId).delete();
+    }
+
+    function switchDay(dayKey) {
+      currentDayKey = dayKey;
+      // désactiver onglets
+      document.querySelectorAll('.day-tab').forEach(n => n.classList.remove('active'));
+      const active = document.querySelector(`.day-tab[data-day="${dayKey}"]`);
+      if (active) active.classList.add('active');
+
+      // nettoyer anciens listeners
+      unsubscribeListeners.forEach(unsub => unsub());
+      unsubscribeListeners.clear();
+
+      // écoute la collection de tracks pour chaque jour? -> juste le jour actif
+      const unsub = playlistTracksCol(dayKey)
+        .orderBy('addedAt', 'desc')
+        .onSnapshot((snap) => {
+          const tracks = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          renderPlaylist(tracks, dayKey);
+        });
+      unsubscribeListeners.set(dayKey, unsub);
+    }
+
+    function renderDayTabs() {
+      const tabs = document.getElementById('day-tabs');
+      tabs.innerHTML = '';
+      for (const d of DAYS) {
+        const btn = document.createElement('button');
+        btn.className = 'day-tab px-3 py-1.5 rounded-xl bg-white border border-slate-200 shadow-sm text-sm';
+        btn.textContent = d.label;
+        btn.dataset.day = d.key;
+        if (d.key === currentDayKey) btn.classList.add('active');
+        btn.addEventListener('click', () => switchDay(d.key));
+        tabs.appendChild(btn);
+      }
+    }
+
+    function renderPlaylist(tracks, dayKey) {
+      const root = document.getElementById('playlist');
+      if (!currentUser) { root.innerHTML = uiCardInfo('Connecte-toi.'); return; }
+      if (!tracks.length) { root.innerHTML = uiCardInfo(`Aucun son dans ${capitalize(dayKey)}. Ajoute depuis la recherche ↑`); return; }
+      root.innerHTML = '';
+      for (const tr of tracks) {
+        const row = document.createElement('div');
+        row.className = 'p-3 rounded-2xl bg-white border border-slate-200 shadow-sm flex gap-3 items-center';
+        row.innerHTML = `
+          <img src="${(tr.artwork||'').replace('100x100','200x200')}" class="w-14 h-14 rounded-xl object-cover" alt=""/>
+          <div class="flex-1 min-w-0">
+            <div class="font-semibold truncate">${escapeHtml(tr.title || '')}</div>
+            <div class="text-sm text-slate-600 truncate">${escapeHtml(tr.artist || '')}</div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button class="play px-2 py-1 rounded-lg bg-slate-200">▶️</button>
+            <button class="del px-2 py-1 rounded-lg bg-red-600 text-white">Retirer</button>
+          </div>`;
+        row.querySelector('.play').addEventListener('click', () => playPreview(tr.previewUrl));
+        row.querySelector('.del').addEventListener('click', async () => {
+          await removeTrack(dayKey, tr.id);
+        });
+        root.appendChild(row);
+      }
+    }
+
+    // --- UI helpers ---
+    function uiCardInfo(text) {
+      return `<div class=\"p-4 rounded-2xl bg-slate-100 border border-slate-200 text-slate-700\">${text}</div>`;
+    }
+    function uiCardError(text) {
+      return `<div class=\"p-4 rounded-2xl bg-red-50 border border-red-200 text-red-700\">${text}</div>`;
+    }
+    function uiCardLoading(text) {
+      return `<div class=\"p-4 rounded-2xl bg-white border border-slate-200 text-slate-700 shadow-sm\">${text}</div>`;
+    }
+    function capitalize(s){ return s.charAt(0).toUpperCase()+s.slice(1); }
+    function escapeHtml(str){
+      return String(str).replace(/[&<>"]{1}/g, (m) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+    }
+
+    // mini toast
+    let toastTimeout;
+    function toast(text){
+      clearTimeout(toastTimeout);
+      let t = document.getElementById('toast');
+      if(!t){
+        t = document.createElement('div');
+        t.id = 'toast';
+        t.className = 'fixed bottom-24 left-1/2 -translate-x-1/2 px-3 py-2 rounded-xl bg-black text-white text-sm shadow-lg';
+        document.body.appendChild(t);
+      }
+      t.textContent = text;
+      t.style.opacity = '1';
+      toastTimeout = setTimeout(()=>{ t.style.opacity='0'; }, 1800);
+    }
+  </script>
+
+  <!-- Sécurité Firestore (à configurer côté console):
+  Exemple de règles strictes (Firestore Rules):
+
+  rules_version = '2';
+  service cloud.firestore {
+    match /databases/{database}/documents {
+      match /users/{userId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+        match /playlists/{day} {
+          allow read, write: if request.auth != null && request.auth.uid == userId;
+          match /tracks/{trackId} {
+            allow read, write: if request.auth != null && request.auth.uid == userId;
+          }
+        }
+      }
+    }
+  }
+  -->
+</body>
+</html>
