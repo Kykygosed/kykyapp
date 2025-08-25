@@ -199,13 +199,12 @@ function listenLatestPosts() {
 async function renderPost(p) {
   const userSnap = await get(ref(db,"users/"+p.authorId));
   const av = initials(p.authorName||"User");
-  const canDelete = p.authorId === current.uid;
+  const isCurrentAdmin = current?.admin; // admin connecté
+  const canDelete = !isCurrentAdmin && p.authorId === current.uid; // bouton supprimer si c'est notre post et pas admin
 
   const likeSnap = await get(ref(db, `postLikes/${p.id}/${current.uid}`));
   const liked = likeSnap.exists();
   const likeIcon = liked ? "like.png" : "unlike.png";
-
-  const isCurrentAdmin = current?.admin; // admin connecté
 
   return el`
     <article id="post_${p.id}" class="bg-white p-4 rounded-xl shadow border border-gray-100 relative">
@@ -246,7 +245,7 @@ async function renderPost(p) {
             <button data-act="comment" data-id="${p.id}"><img src="comments.png" class="w-5 h-5"/> <span id="c_${p.id}">${p.commentCount||0}</span></button>
             <button data-act="like" data-id="${p.id}"><img src="${likeIcon}" class="w-5 h-5"/> <span id="l_${p.id}">${p.likeCount||0}</span></button>
             <button data-act="reply" data-id="${p.id}"><img src="reply.png" class="w-5 h-5"/></button>
-            ${canDelete && !isCurrentAdmin ? `<button data-act="delete" data-id="${p.id}" class="text-red-500 font-bold ml-2">Supprimer</button>` : ""}
+            ${canDelete ? `<button data-act="delete" data-id="${p.id}" class="text-red-500 font-bold ml-2">Supprimer</button>` : ""}
           </div>
 
           <div id="comments_${p.id}" class="mt-3 space-y-3 hidden"></div>
