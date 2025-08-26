@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Canari Clicker Stylé</title>
+<style>
+/* === FOND ET TYPO === */
+body {
+  font-family: 'Comic Sans MS', cursive, sans-serif;
+  margin:0; padding:0;
+  background: linear-gradient(135deg, #ffe29f, #ff7e5f);
+  display:flex; flex-direction:column; align-items:center;
+}
+
+/* === CONTAINERS === */
+#login, #game {
+  background: rgba(255,255,255,0.85);
+  padding:20px; border-radius:20px;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+  margin-top:40px; text-align:center;
+  width:90%; max-width:700px;
+}
+
+h2 { color:#ff9900; text-shadow:1px 1px 2px #fff; }
+
+/* === BOUTONS === */
+button {
+  background:#ffcc00; border:none; padding:10px 20px; margin:5px;
+  border-radius:15px; font-weight:bold; cursor:pointer;
+  box-shadow: 0 5px #d4a700;
+  transition: all 0.2s ease;
+}
+button:hover {
+  background:#ffd633; transform: translateY(-2px);
+}
+button:active { transform: translateY(2px); box-shadow:0 3px #d4a700; }
+
+/* === ŒUF ET ÉLEVEURS === */
+#eggContainer { position:relative; height:200px; margin-top:20px; }
+#egg { width:120px; cursor:pointer; transition: transform 0.1s; }
+#egg:active { transform: scale(1.3); }
+#breeders img {
+  width:50px; position:absolute;
+  animation: spin linear infinite;
+}
+@keyframes spin { 0%{ transform: rotate(0deg) translateX(120px) rotate(0deg); } 100%{ transform: rotate(360deg) translateX(120px) rotate(-360deg); } }
+
+/* === MAP === */
+#mapContainer {
+  margin-top:20px; width:600px; height:400px; overflow:hidden;
+  position:relative; border-radius:20px; box-shadow:0 10px 25px rgba(0,0,0,0.3);
+  border:3px solid #ffcc00; background:#c3f0f4;
+  touch-action:none;
+}
+.farm { width:100%; height:100%; object-fit:cover; position:absolute; top:0; left:0; border-radius:15px; }
+.group { width:30px; position:absolute; transition: transform 0.3s; }
+
+/* === INFO CANARIS === */
+p { font-size:20px; font-weight:bold; color:#ff6600; text-shadow:1px 1px #fff; }
+
+/* === INPUT === */
+input { padding:10px; border-radius:10px; border:2px solid #ffcc00; outline:none; font-size:16px; margin-right:10px; }
+</style>
+</head>
+<body>
+
+<div id="login">
+<h2>Entrez le nom de votre élevage :</h2>
+<input type="text" id="username" placeholder="Nom d'élevage">
+<button onclick="login()">Jouer</button>
+</div>
+
+<div id="game" style="display:none;">
+<h2 id="playerName"></h2>
+<div id="eggContainer">
+  <img id="egg" src="egg.png" alt="Oeuf">
+  <div id="breeders"></div>
+</div>
+<p>Canaris : <span id="canaryCount">0</span></p>
+<button id="buyBreeder" onclick="buyBreeder()">Acheter un éleveur (50)</button>
+<button id="upgradeBreeders" onclick="upgradeBreeders()" style="display:none;">Amélioration x2 (100)</button>
+<button id="buyFarm" onclick="buyFarm()" style="display:none;">Acheter une ferme (100)</button>
+
+<div id="mapContainer" style="display:none;"></div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script>
+// === FIREBASE CONFIG ===
+const firebaseConfig = {
+  apiKey: "AIzaSyDFfUnu076ChN_Js0QYmaABdJJMOQbGv1Q",
+  authDomain: "kyky-4b748.firebaseapp.com",
+  databaseURL: "https://kyky-4b748-default-rtdb.firebaseio.com",
+  projectId: "kyky-4b748",
+  storageBucket: "kyky-4b748.firebasestorage.app",
+  messagingSenderId: "980205708455",
+  appId: "1:980205708455:web:b9125afa8028f65b042782",
+  measurementId: "G-HDMXRP2FP0"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+// === VARIABLES ===
+let playerName="", canaryCount=0, breeders=0, breederPrice=50;
+let farmCount=0, farmPrices=[100,200,500,1000], upgradeBought=false;
+let breederBasePower=5, breederLevel=0, breederIntervalBase=5000, breederInterval=5000;
+
+// === LOGIN ===
+function login(){
+  playerName=document.getElementById("username").value;
+  if(!playerName) return alert("Entrez un nom !");
+  document.getElementById("login").style.display="none";
+  document.getElementById("game").style.display="block";
+  document.getElementById("playerName").innerText="Élevage : "+playerName;
+
+  db.ref("players/"+playerName).get().then(snapshot=>{
+    if(snapshot.exists()){
+      const data=snapshot.val();
+      canaryCount=data.canaryCount||0;
+      breeders=data.breeders||0;
+      farmCount=data.farmCount||0;
+      upgradeBought=data.upgradeBought||false;
+      breederLevel=data.breederLevel||0;
+      breederInterval = breederIntervalBase / Math.pow(2, breederLevel);
+      updateDisplay();
+    }
+  });
+}
+
+// === CLICK OEUF ===
+document.getElementById("egg").addEventListener("click",()=>{
+  canaryCount++; checkUpgrades(); updateDisplay(); saveData();
+});
+
+// === ACHETER ÉLEVEUR ===
+function buyBreeder(){
+  if(canaryCount>=breederPrice){
+    canaryCount-=breederPrice; breeders++; breederPrice*=2;
+    updateDisplay(); checkUpgrades(); saveData();
+  } else alert("Pas assez de canaris !");
+}
+
+// === AMÉLIORER ÉLEVEURS ===
+function upgradeBreeders(){
+  if(canaryCount>=100){
+    canaryCount-=100; breederLevel++; breederInterval = breederIntervalBase / Math.pow(2, breederLevel);
+    upgradeBought=true; document.getElementById("upgradeBreeders").style.display="none";
+    updateDisplay(); saveData();
+  }
+}
+
+// === ACHETER FERME ===
+function buyFarm(){
+  if(canaryCount>=farmPrices[farmCount]){
+    canaryCount-=farmPrices[farmCount]; farmCount++;
+    document.getElementById("mapContainer").style.display="block";
+    updateDisplay(); checkUpgrades(); saveData();
+  }
+}
+
+// === CHECK UPGRADES ===
+function checkUpgrades(){
+  if(canaryCount>=100 && !upgradeBought) document.getElementById("upgradeBreeders").style.display="inline-block";
+  if(farmCount<farmPrices.length && canaryCount>=farmPrices[farmCount]) document.getElementById("buyFarm").style.display="inline-block";
+}
+
+// === UPDATE DISPLAY ===
+function updateDisplay(){
+  document.getElementById("canaryCount").innerText=canaryCount;
+  document.getElementById("buyBreeder").innerText=`Acheter un éleveur (${breederPrice})`;
+
+  // ÉLEVEURS
+  const container=document.getElementById("breeders"); container.innerHTML="";
+  for(let i=0;i<breeders;i++){
+    const img=document.createElement("img"); img.src="eleveur.png";
+    img.style.transform=`rotate(${(360/breeders)*i}deg) translateX(120px) rotate(-${(360/breeders)*i}deg)`;
+    container.appendChild(img);
+  }
+
+  // FERMES
+  const map=document.getElementById("mapContainer"); map.innerHTML="";
+  for(let f=0;f<farmCount;f++){
+    const farm=document.createElement("img"); farm.src="farm.png"; farm.className="farm";
+    farm.style.left=f*620+"px"; map.appendChild(farm);
+
+    let groupCount=Math.min(canaryCount,50*(f+1));
+    for(let g=0;g<groupCount;g++){
+      const img=document.createElement("img"); img.src="group.png"; img.className="group";
+      img.style.left=Math.random()*600+"px"; img.style.top=Math.random()*400+"px"; farm.appendChild(img);
+    }
+  }
+}
+
+// === AUTOMATIQUE ÉLEVEURS ===
+function runBreeders(){
+  if(breeders>0){
+    canaryCount+=breeders*breederBasePower*Math.pow(2,breederLevel);
+    checkUpgrades(); updateDisplay(); saveData();
+  }
+  setTimeout(runBreeders, breederInterval);
+}
+runBreeders();
+
+// === SAUVEGARDE ===
+function saveData(){
+  db.ref("players/"+playerName).set({
+    canaryCount, breeders, farmCount, upgradeBought, breederLevel
+  });
+}
+
+// === MAP ZOOM & DRAG ===
+let scale=1, startX=0, startY=0, originX=0, originY=0;
+const map=document.getElementById("mapContainer");
+map.addEventListener("wheel",(e)=>{
+  e.preventDefault();
+  scale+=e.deltaY*-0.001; scale=Math.min(Math.max(0.5,scale),3);
+  map.style.transform=`scale(${scale}) translate(${originX}px,${originY}px)`;
+});
+map.addEventListener("pointerdown",(e)=>{ startX=e.clientX; startY=e.clientY; map.setPointerCapture(e.pointerId); });
+map.addEventListener("pointermove",(e)=>{
+  if(e.pressure>0){ originX+=(e.clientX-startX)/scale; originY+=(e.clientY-startY)/scale;
+    startX=e.clientX; startY=e.clientY;
+    map.style.transform=`scale(${scale}) translate(${originX}px,${originY}px)`; }
+});
+</script>
+</body>
+</html>
