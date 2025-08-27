@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Simulateur de vol 3D (Three.js)</title>
+  <title>Simulateur de vol 3D (Three.js + GLB)</title>
   <style>
     body{margin:0;overflow:hidden;background:#000;color:#fff;font-family:sans-serif}
     #hud{position:fixed;top:10px;left:10px;background:rgba(0,0,0,.5);padding:8px 12px;border-radius:8px;font-size:14px}
@@ -12,18 +12,20 @@
 </head>
 <body>
   <div id="hud">
-    Contrôles : <kbd>Z/S</kbd> tangage · <kbd>Q/D</kbd> roulis · <kbd>A/E</kbd> lacet · <kbd>↑/↓</kbd> vitesse · <kbd>R</kbd> reset
+    Contrôles : <kbd>Z/S</kbd> tangage · <kbd>Q/D</kbd> roulis · <kbd>A/E</kbd> lacet · <kbd>↑/↓</kbd> vitesse · <kbd>R</kbd> reset
     <div id="status"></div>
   </div>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
-  <script src="https://unpkg.com/three@0.160.0/examples/js/loaders/GLTFLoader.js"></script>
+
+  <!-- Three.js et GLTFLoader (ancienne version stable qui expose THREE.GLTFLoader) -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 
   <script>
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x87ceeb);
 
   const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 10000);
-  camera.position.set(0,4,-12);
+  camera.position.set(0,2,6);
 
   const renderer = new THREE.WebGLRenderer({antialias:true});
   renderer.setSize(innerWidth,innerHeight);
@@ -49,21 +51,21 @@
   dir.position.set(100,200,100);
   scene.add(dir);
 
-  // Avion (chargé en GLB)
+  // Avion (on chargera le GLB ici)
   let plane;
   const loader = new THREE.GLTFLoader();
-
-
-  loader.load('avion.glb',(gltf)=>{
+  loader.load("avion.glb", (gltf)=>{
     plane = gltf.scene;
     plane.scale.set(5,5,5);
+    plane.position.set(0,100,0);
     scene.add(plane);
-    plane.add(cameraTarget);
+
+    plane.add(cameraTarget); // on attache la caméra derrière l’avion
   });
 
-  // Caméra suiveuse (vue arrière)
+  // Caméra suiveuse
   const cameraTarget = new THREE.Object3D();
-  cameraTarget.position.set(0,2,12);
+  cameraTarget.position.set(0,2,-10);
 
   // État avion
   const state={pitch:0,yaw:0,roll:0,speed:50,pos:new THREE.Vector3(0,100,0)};
@@ -72,7 +74,8 @@
   addEventListener('keyup',e=>keys.delete(e.code));
 
   function physics(dt){
-    if(!plane) return;
+    if(!plane) return; // attendre que l’avion soit chargé
+
     // Contrôles
     const pitchRate=(keys.has('KeyZ')?-0.5:0)+(keys.has('KeyS')?0.5:0);
     const rollRate =(keys.has('KeyQ')?-0.8:0)+(keys.has('KeyD')?0.8:0);
@@ -86,7 +89,7 @@
     state.roll +=rollRate*dt;
     state.yaw  +=yawRate*dt;
 
-    // Direction
+    // Orientation avion
     const q=new THREE.Quaternion();
     q.setFromEuler(new THREE.Euler(state.pitch,state.yaw,state.roll,'YXZ'));
     plane.quaternion.copy(q);
@@ -110,8 +113,8 @@
     if(plane){
       camera.position.lerp(cameraTarget.getWorldPosition(new THREE.Vector3()),0.05);
       camera.lookAt(plane.position);
-      status.textContent=`Vitesse ${state.speed.toFixed(0)} m/s · Alt ${plane.position.y.toFixed(0)} m`;
     }
+    status.textContent=`Vitesse ${state.speed.toFixed(0)} m/s · Alt ${plane?.position.y.toFixed(0) ?? 0} m`;
     renderer.render(scene,camera);
     requestAnimationFrame(animate);
   }
