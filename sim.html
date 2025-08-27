@@ -50,7 +50,8 @@
 
   // Avion (chargé en GLB)
   let plane;
-  const loader = new THREE.GLTFLoader();
+  const loader = new GLTFLoader();
+
   loader.load('avion.glb',(gltf)=>{
     plane = gltf.scene;
     plane.scale.set(5,5,5);
