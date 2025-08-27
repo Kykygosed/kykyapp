@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Simulateur de vol 3D (Three.js)</title>
+  <style>
+    body{margin:0;overflow:hidden;background:#000;color:#fff;font-family:sans-serif}
+    #hud{position:fixed;top:10px;left:10px;background:rgba(0,0,0,.5);padding:8px 12px;border-radius:8px;font-size:14px}
+    kbd{background:#111;padding:2px 5px;border-radius:4px;border:1px solid #444}
+  </style>
+</head>
+<body>
+  <div id="hud">
+    Contrôles : <kbd>Z/S</kbd> tangage · <kbd>Q/D</kbd> roulis · <kbd>A/E</kbd> lacet · <kbd>↑/↓</kbd> vitesse · <kbd>R</kbd> reset
+    <div id="status"></div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/loaders/GLTFLoader.js"></script>
+  <script>
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x87ceeb);
+
+  const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 10000);
+  camera.position.set(0,4,-12);
+
+  const renderer = new THREE.WebGLRenderer({antialias:true});
+  renderer.setSize(innerWidth,innerHeight);
+  document.body.appendChild(renderer.domElement);
+  window.addEventListener('resize',()=>{
+    camera.aspect=innerWidth/innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth,innerHeight);
+  });
+
+  // Sol
+  const groundGeo = new THREE.PlaneGeometry(10000,10000,100,100);
+  const groundMat = new THREE.MeshPhongMaterial({color:0x228822,wireframe:false});
+  const ground = new THREE.Mesh(groundGeo,groundMat);
+  ground.rotation.x = -Math.PI/2;
+  scene.add(ground);
+
+  // Lumières
+  const hemi = new THREE.HemisphereLight(0xffffff,0x444444,0.8);
+  hemi.position.set(0,200,0);
+  scene.add(hemi);
+  const dir = new THREE.DirectionalLight(0xffffff,0.8);
+  dir.position.set(100,200,100);
+  scene.add(dir);
+
+  // Avion (chargé en GLB)
+  let plane;
+  const loader = new THREE.GLTFLoader();
+  loader.load('avion.glb',(gltf)=>{
+    plane = gltf.scene;
+    plane.scale.set(5,5,5);
+    scene.add(plane);
+    plane.add(cameraTarget);
+  });
+
+  // Caméra suiveuse (vue arrière)
+  const cameraTarget = new THREE.Object3D();
+  cameraTarget.position.set(0,2,12);
+
+  // État avion
+  const state={pitch:0,yaw:0,roll:0,speed:50,pos:new THREE.Vector3(0,100,0)};
+  const keys=new Set();
+  addEventListener('keydown',e=>keys.add(e.code));
+  addEventListener('keyup',e=>keys.delete(e.code));
+
+  function physics(dt){
+    if(!plane) return;
+    // Contrôles
+    const pitchRate=(keys.has('KeyZ')?-0.5:0)+(keys.has('KeyS')?0.5:0);
+    const rollRate =(keys.has('KeyQ')?-0.8:0)+(keys.has('KeyD')?0.8:0);
+    const yawRate  =(keys.has('KeyA')?0.4:0)+(keys.has('KeyE')?-0.4:0);
+
+    if(keys.has('ArrowUp')) state.speed+=20*dt;
+    if(keys.has('ArrowDown')) state.speed-=20*dt;
+    state.speed=Math.max(10,Math.min(300,state.speed));
+
+    state.pitch+=pitchRate*dt;
+    state.roll +=rollRate*dt;
+    state.yaw  +=yawRate*dt;
+
+    // Direction
+    const q=new THREE.Quaternion();
+    q.setFromEuler(new THREE.Euler(state.pitch,state.yaw,state.roll,'YXZ'));
+    plane.quaternion.copy(q);
+
+    const forward=new THREE.Vector3(0,0,-1).applyQuaternion(q);
+    state.pos.add(forward.multiplyScalar(state.speed*dt));
+    plane.position.copy(state.pos);
+
+    if(plane.position.y<1){plane.position.y=1;state.pos.y=1;state.speed*=0.98;}
+
+    if(keys.has('KeyR')){
+      state.pitch=state.yaw=state.roll=0;state.speed=50;state.pos.set(0,100,0);
+    }
+  }
+
+  const status=document.getElementById('status');
+  let last=performance.now();
+  function animate(t){
+    const dt=(t-last)/1000;last=t;
+    physics(dt);
+    if(plane){
+      camera.position.lerp(cameraTarget.getWorldPosition(new THREE.Vector3()),0.05);
+      camera.lookAt(plane.position);
+      status.textContent=`Vitesse ${state.speed.toFixed(0)} m/s · Alt ${plane.position.y.toFixed(0)} m`;
+    }
+    renderer.render(scene,camera);
+    requestAnimationFrame(animate);
+  }
+  animate(performance.now());
+  </script>
+</body>
+</html>
