@@ -1,6 +1,6 @@
 {
-  "name": "Mon Site",
-  "short_name": "MonSite",
+  "name": "KykyApp",
+  "short_name": "KykyApp",
   "start_url": "/index.html",
   "display": "standalone",
   "background_color": "#ffffff",
